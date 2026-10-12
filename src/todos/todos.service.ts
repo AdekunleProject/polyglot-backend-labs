@@ -37,7 +37,16 @@ export class TodosService {
     return {deleted: true};
   }  
 
-  update(id:number, updateTodoDto: UpdateTodoDto) {
-    return `This action updates a #${id} todo`
+  async update(id:number, updateTodoDto: UpdateTodoDto) {
+    const todo = await this.findOne(id);
+    if (!todo) {
+      throw new NotFoundException('Todo ${id} cannot be updated')
+    }
+    Object.assign(todo, updateTodoDto);
+    return this.todosRepository.save(todo);
   }
+
+  // update(id:number, updateTodoDto: UpdateTodoDto) {
+  //   return `This action updates a #${id} todo`
+  // }
 }
