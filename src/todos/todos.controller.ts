@@ -9,14 +9,15 @@ import {
 } from '@nestjs/common';
 import { TodosService } from './todos.service';
 import { UpdateTodoDto } from './dto/update-todo.dto';
+import { CreateTodoDto } from './dto/create-todo.dto';
 
 @Controller('todos')
 export class TodosController {
   constructor(private readonly todosService: TodosService) {}
 
   @Post()
-  create(@Body() body: { title: string }) {
-    return this.todosService.create(body.title);
+  create(@Body() createTodoDto: CreateTodoDto) {
+    return this.todosService.create(createTodoDto.title);
   }
 
   @Get()
