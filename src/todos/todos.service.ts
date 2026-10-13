@@ -14,6 +14,9 @@ export class TodosService {
 
   create(title: string){
     const todo = this.todosRepository.create({title});
+     if (!todo) {
+      throw new NotFoundException(`Todo ${title} not found`)
+    }
     return this.todosRepository.save(todo);
   };
 
@@ -24,25 +27,27 @@ export class TodosService {
   async findOne(id: number) {
     const todo = await this.todosRepository.findOneBy({id});
     if (!todo) {
-      throw new NotFoundException('Todo ${id} not found')
+      throw new NotFoundException(`Todo ${id} not found`)
     }
     return todo;
   };
 
   async remove(id: number) {
-    const result = await this.todosRepository.delete(id);
+    const result = await this.todosRepository.delete({id});
     if (result.affected === 0) {
-      throw new NotFoundException(' Todo ${id} not found')
+      throw new NotFoundException(`Todo ${id} not found`)
     }
     return {deleted: true};
   }  
 
-  async update(id:number, updateTodoDto: UpdateTodoDto) {
-    const todo = await this.findOne(id);
+  async update(id: number, updateTodoDto: UpdateTodoDto) {
+    const todo = await this.todosRepository.findOneBy({id});
     if (!todo) {
-      throw new NotFoundException('Todo ${id} cannot be updated')
+      throw new NotFoundException(`Todo ${id} cannot be updated`);
     }
+
     Object.assign(todo, updateTodoDto);
+
     return this.todosRepository.save(todo);
   }
 
