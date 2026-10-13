@@ -1,0 +1,4 @@
+.git-backup
+node_modules
+dist
+.env
