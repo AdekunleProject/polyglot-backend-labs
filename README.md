@@ -35,3 +35,4 @@ The API runs at `http://localhost:3000`.
 | GET | /todos | List all todos |
 | GET | /todos/:id | Get one todo |
 | DELETE | /todos/:id | Delete a todo |
+| PATCH | /todos/:id | Update a todo |
