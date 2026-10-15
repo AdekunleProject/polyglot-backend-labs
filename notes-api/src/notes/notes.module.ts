@@ -6,7 +6,6 @@ import { Note } from './entities/note.entity';
 import { User } from '../users/entities/user.entity';
 
 @Module({
-  
   // forFeature([Note]) registers the entity. Without it, the table is never created.
   imports: [TypeOrmModule.forFeature([Note, User])],
   controllers: [NotesController],
