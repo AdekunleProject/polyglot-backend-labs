@@ -4,7 +4,7 @@ import { User } from '../../users/entities/user.entity';
 @Entity('notes')
 export class Note {
   @PrimaryGeneratedColumn()
-  id: string;
+  id: number;
 
   @Column({ length:200})
   title: string
@@ -25,4 +25,6 @@ export class Note {
   // each other.
   @ManyToOne(() => User, (user) => user.notes, {nullable: false, onDelete: 'CASCADE'})
   user: User
+
+  
 }

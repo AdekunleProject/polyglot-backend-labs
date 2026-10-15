@@ -5,7 +5,7 @@ import { Note } from '../../notes/entities/note.entity';
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn()
-  id: string;
+  id: number;
 
   @Column({length: 100})
   @IsNotEmpty()
@@ -14,7 +14,6 @@ export class User {
 
   @Column({ length: 150, unique: true })
   @IsNotEmpty()
-  @IsString()
   @IsEmail()
   email: string;
 
