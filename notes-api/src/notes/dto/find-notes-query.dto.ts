@@ -29,11 +29,12 @@ export class FindNotesQueryDto {
   @Max(50)
   limit: number = 10;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   search: string;
 
-  @IsNotEmpty()
+  @IsOptional()
+  @IsInt()
   @Type(() => Number)
   userId: number;
 }
