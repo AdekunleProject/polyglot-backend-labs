@@ -5,6 +5,7 @@ import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 import { Note } from './entities/note.entity';
 import { User } from '../users/entities/user.entity';
+import { FindNotesQueryDto } from './dto/find-notes-query.dto';
 
 @Injectable()
 export class NotesService {
@@ -32,22 +33,31 @@ export class NotesService {
     return this.notesRepository.save(note);
   }
 
-  findAll() {
-    return this.notesRepository.find({
+  async findAll(query: FindNotesQueryDto) {
+    const [items, total] = await this.notesRepository.findAndCount({
       relations: { user: true },
       order: { createdAt: 'DESC' },
+      take: query.limit,
+      skip: (query.page - 1) * query.limit,
     });
+    return {
+      items,
+      total,
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.ceil(total / query.limit),
+    };
   }
 
-  findOne(id: number) {
+  async findOne(id: number) {
     return `This action returns a #${id} note`;
   }
 
-  update(id: number, updateNoteDto: UpdateNoteDto) {
+  async update(id: number, updateNoteDto: UpdateNoteDto) {
     return `This action updates a #${id} note`;
   }
 
-  remove(id: number) {
+  async remove(id: number) {
     return `This action removes a #${id} note`;
   }
 }

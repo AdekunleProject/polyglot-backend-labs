@@ -1,0 +1,5 @@
+The user object only shows id, name and email, which is right because the entity has no password. 
+Remember that relations: { user: true } returns every column of the related table. 
+When we add passwords in the auth project, we’ll need to hide that column, 
+or it would leak in responses like this.
+

@@ -6,23 +6,25 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
 } from '@nestjs/common';
 import { NotesService } from './notes.service';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
+import { FindNotesQueryDto } from './dto/find-notes-query.dto';
 
 @Controller('notes')
 export class NotesController {
   constructor(private readonly notesService: NotesService) {}
 
   @Post()
-  create(@Body() ctrateNoteDto: CreateNoteDto) {
-    return this.notesService.create(ctrateNoteDto);
+  create(@Body() createNoteDto: CreateNoteDto) {
+    return this.notesService.create(createNoteDto);
   }
 
   @Get()
-  findAll() {
-    return this.notesService.findAll();
+  findAll(@Query() query: FindNotesQueryDto) {
+    return this.notesService.findAll(query);
   }
 
   @Get(':id')
