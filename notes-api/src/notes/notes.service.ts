@@ -50,14 +50,27 @@ export class NotesService {
   }
 
   async findOne(id: number) {
-    return `This action returns a #${id} note`;
+    const note = await this.notesRepository.findOne({
+      where: { id },
+      relations: { user: true },
+    });
+    if (!note) {
+      throw new NotFoundException(`Note with id ${id} not found`);
+    }
+    return note;
   }
 
   async update(id: number, updateNoteDto: UpdateNoteDto) {
-    return `This action updates a #${id} note`;
+    const note = await this.findOne(id);
+    Object.assign(note, updateNoteDto);
+    return this.notesRepository.save(note);
   }
 
   async remove(id: number) {
-    return `This action removes a #${id} note`;
+    const result = await this.notesRepository.delete(id);
+    if (result.affected === 0) {
+      throw new NotFoundException(`Note with id ${id} not found`);
+    }
+    return { deleted: true };
   }
 }
