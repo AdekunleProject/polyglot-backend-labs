@@ -3,7 +3,14 @@
 // use lots of memory, and send a huge response. Pagination fixes this by returning a small page at a time:
 
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 // @Type(() => Number) turns the text from the URL into a number.
 // @Max(50) stops someone requesting limit=1000000, which would defeat the point of pagination.
@@ -21,4 +28,12 @@ export class FindNotesQueryDto {
   @Min(1)
   @Max(50)
   limit: number = 10;
+
+  @IsNotEmpty()
+  @IsString()
+  search: string;
+
+  @IsNotEmpty()
+  @Type(() => Number)
+  userId: number;
 }

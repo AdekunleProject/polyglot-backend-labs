@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository, FindOptionsWhere, ILike } from 'typeorm';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 import { Note } from './entities/note.entity';
@@ -34,12 +34,22 @@ export class NotesService {
   }
 
   async findAll(query: FindNotesQueryDto) {
+    const where: FindOptionsWhere<Note> = {};
+    if (query.search) {
+      where.title = ILike(`%${query.search}%`);
+    }
+    if (query.userId) {
+      where.user = { id: query.userId };
+    }
+
     const [items, total] = await this.notesRepository.findAndCount({
+      where,
       relations: { user: true },
       order: { createdAt: 'DESC' },
       take: query.limit,
       skip: (query.page - 1) * query.limit,
     });
+
     return {
       items,
       total,
