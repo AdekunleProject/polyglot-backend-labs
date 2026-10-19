@@ -23,6 +23,9 @@ export class Note {
   @CreateDateColumn()
   createdAt: Date;
 
+  @Column({ default: false })
+  isPinned: boolean;
+
   // @ManyToOne is the side that holds the foreign key. TypeORM creates a userId column in
   // notes, the same idea as your user_id REFERENCES users(id).
   // nullable: false matches the NOT NULL from design.md.

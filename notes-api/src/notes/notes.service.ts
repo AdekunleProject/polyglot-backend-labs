@@ -24,21 +24,21 @@ export class NotesService {
       throw new NotFoundException(
         `User with id ${createNoteDto.userId} not found`,
       );
-    };
+    }
     const note = this.notesRepository.create({
       title: createNoteDto.title,
       content: createNoteDto.content,
       user: { id: createNoteDto.userId },
     });
     return this.notesRepository.save(note);
-  };
+  }
 
-  // Building where step by step means each filter only applies when it was sent. 
+  // Building where step by step means each filter only applies when it was sent.
   // An empty where object means “no filter”.
 
-  // findAndCount runs the WHERE clause for both the page of rows and the count. 
-  // So total is “how many rows match the filter”, not “how many rows exist”. 
-  // With search=note 1, only a few titles match, so total shrinks and totalPages shrinks with it. 
+  // findAndCount runs the WHERE clause for both the page of rows and the count.
+  // So total is “how many rows match the filter”, not “how many rows exist”.
+  // With search=note 1, only a few titles match, so total shrinks and totalPages shrinks with it.
   // That’s what you want: the caller pages through the filtered results, not the whole table.
   async findAll(findNotesDto: FindNotesDto) {
     const where: FindOptionsWhere<Note> = {};
@@ -64,7 +64,7 @@ export class NotesService {
       limit: findNotesDto.limit,
       totalPages: Math.ceil(total / findNotesDto.limit),
     };
-  };
+  }
 
   async findOne(id: number) {
     const note = await this.notesRepository.findOne({
@@ -75,13 +75,13 @@ export class NotesService {
       throw new NotFoundException(`Note with id ${id} not found`);
     }
     return note;
-  };
+  }
 
   async update(id: number, updateNoteDto: UpdateNoteDto) {
     const note = await this.findOne(id);
     Object.assign(note, updateNoteDto);
     return this.notesRepository.save(note);
-  };
+  }
 
   async remove(id: number) {
     const result = await this.notesRepository.delete(id);
@@ -89,5 +89,5 @@ export class NotesService {
       throw new NotFoundException(`Note with id ${id} not found`);
     }
     return { deleted: true };
-  };
-};
+  }
+}
