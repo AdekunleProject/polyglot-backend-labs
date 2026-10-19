@@ -3,3 +3,29 @@ Remember that relations: { user: true } returns every column of the related tabl
 When we add passwords in the auth project, we’ll need to hide that column, 
 or it would leak in responses like this.
 
+
+
+
+Next: migrations
+
+Right now synchronize: true makes TypeORM change your tables automatically on every restart. You saw the danger yourself: the leftover password column, and the need to drop tables to get a clean state. In a real project, that could drop or alter a column holding customer data.
+
+Migrations replace it. A migration is a versioned file of SQL changes that runs once, in order, and is recorded in a table so it never runs twice. That’s the “numbered SQL files” idea you suggested way back when you asked for your SQL in files, and now it becomes the real mechanism.
+
+The plan for next time:
+
+    Turn synchronize off.
+    Configure a TypeORM DataSource file for the CLI.
+    Generate an initial migration from your entities.
+    Run it against a fresh database, and see the migrations table.
+    Make a change (add a isPinned column to notes) as a second migration.
+
+Tell me when the commit is pushed and the README is written, and we’ll start.
+
+
+
+Why synchronize: true has to go
+
+With synchronize: true, TypeORM compares your entities to the database on every start and changes the tables to match. You already saw it go wrong: the leftover password column stayed behind, and we had to drop tables to get a clean state. On a real database with customer data, a renamed property could drop a column and everything in it.
+
+A migration is a file of SQL changes that runs once, in order, and is recorded in a migrations table so it never runs twice. Your database then changes only when you decide, and each change is reviewable and committed to git, like your numbered .sql files from the start of this course.

@@ -15,7 +15,7 @@ import {
 // @Type(() => Number) turns the text from the URL into a number.
 // @Max(50) stops someone requesting limit=1000000, which would defeat the point of pagination.
 // The = 1 and = 10 are defaults when the caller sends nothing.
-export class FindNotesQueryDto {
+export class FindNotesDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()

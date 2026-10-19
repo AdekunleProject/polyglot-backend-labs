@@ -12,7 +12,7 @@ import {
 import { NotesService } from './notes.service';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
-import { FindNotesQueryDto } from './dto/find-notes-query.dto';
+import { FindNotesDto } from './dto/find-notes-query.dto';
 
 @Controller('notes')
 export class NotesController {
@@ -24,8 +24,8 @@ export class NotesController {
   }
 
   @Get()
-  findAll(@Query() query: FindNotesQueryDto) {
-    return this.notesService.findAll(query);
+  findAll(@Query() findNotesDto: FindNotesDto) {
+    return this.notesService.findAll(findNotesDto);
   }
 
   @Get(':id')
