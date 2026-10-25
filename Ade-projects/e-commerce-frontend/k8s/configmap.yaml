@@ -1,0 +1,16 @@
+# Non-secret backend config. Real credentials (JWT secrets, Paystack key,
+# Mongo URI with password, etc.) go in secret.yaml instead — never here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: duka
+data:
+  NODE_ENV: "production"
+  PORT: "4000"
+  JWT_EXPIRES_IN: "15m"
+  JWT_REFRESH_EXPIRES_IN: "7d"
+  # Replace with your actual domains once you have them (see ingress.yaml).
+  FRONTEND_URL: "https://app.example.com"
+  BASE_URL: "https://app.example.com"
+  PAYSTACK_CALLBACK_URL: "https://api.example.com/payments/verify"

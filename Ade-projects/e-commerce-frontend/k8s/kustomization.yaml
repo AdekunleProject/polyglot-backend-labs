@@ -1,0 +1,16 @@
+# Apply everything at once with:  kubectl apply -k k8s/
+# (secret.yaml is intentionally NOT listed — create it separately, see
+# secret.example.yaml, so it never ends up committed to git as part of
+# an automatic `kubectl apply -k`.)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  # - mongodb-statefulset.yaml   # uncomment for dev/test only — see its own comments

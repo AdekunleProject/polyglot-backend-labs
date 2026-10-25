@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background-color: #F6F7FB;
+  }
+  body {
+    @apply bg-cream text-ink font-body antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display font-semibold;
+  }
+  :focus-visible {
+    outline: 2px solid #FF6A00;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Product/content card: clean white surface, soft shadow, rounded corners */
+  .ticket {
+    @apply bg-card rounded-xl border border-black/5 shadow-sm;
+  }
+  .ticket::before {
+    content: none;
+  }
+
+  /* Small colored pill badge — sale tags, featured flags, status chips */
+  .stamp {
+    @apply font-display font-semibold uppercase tracking-wide text-[10px] leading-none px-2 py-1 rounded-full border;
+    transform: none;
+  }
+
+  .sku {
+    @apply font-mono text-xs tracking-tight text-inkfaint;
+  }
+
+  .dashed-rule {
+    @apply border-t border-black/10;
+  }
+
+  .btn-primary {
+    @apply font-display font-semibold text-sm bg-rust text-white px-5 py-2.5 rounded-lg hover:bg-rustdark transition-colors duration-150 disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-secondary {
+    @apply font-display font-semibold text-sm border-2 border-ink text-ink px-5 py-2.5 rounded-lg hover:bg-ink hover:text-white transition-colors duration-150 disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .input-field {
+    @apply w-full bg-white border border-black/10 rounded-lg px-3 py-2 text-sm font-body focus:border-rust transition-colors duration-150;
+  }
+  .label-eyebrow {
+    @apply font-display text-[11px] font-semibold uppercase tracking-[0.08em] text-inkfaint;
+  }
+}
