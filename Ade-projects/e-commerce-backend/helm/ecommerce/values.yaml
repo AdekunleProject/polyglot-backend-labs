@@ -1,0 +1,50 @@
+# Image built and pushed by the GitHub Actions pipeline.
+# The tag is always the commit SHA and must be given on the command line:
+#   helm install ecommerce helm/ecommerce --set image.tag=<commit-sha>
+image:
+  repository: ghcr.io/adekunleproject/ecommerce-backend
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 4000
+
+# Name of the Kubernetes Secret holding every sensitive value.
+# It is created with kubectl (see docs/deploy.md) and never stored in Git.
+secretName: ecommerce-secrets
+
+# Non-secret settings, passed to the API as environment variables.
+config:
+  NODE_ENV: production
+  PORT: "4000"
+  JWT_EXPIRES_IN: 15m
+  JWT_REFRESH_EXPIRES_IN: 30d
+  FRONTEND_URL: http://localhost:5173
+  GOOGLE_CALLBACK_URL: http://localhost:4000/auth/google/callback
+  PAYSTACK_CALLBACK_URL: http://localhost:5173/payment/callback
+  AWS_REGION: eu-north-1
+  AWS_S3_BUCKET: placeholder
+  ADMIN_EMAIL: admin@example.com
+  ENABLE_DOCS: "true"
+  MAIL_PORT: "587"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+mongo:
+  image: mongo:7
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi

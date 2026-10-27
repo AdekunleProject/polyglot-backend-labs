@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document } from 'mongoose';
 import { Factory } from 'nestjs-seeder';
 import { Role } from '../../common/enums/role.enum';
 import { AuthProvider } from 'src/common/enums/auth-provider.enum';
@@ -43,13 +43,12 @@ export class User extends Document {
   @Prop({ required: false, default: null })
   address!: string;
   @Factory((faker) => faker!.helpers.arrayElement([Role.CUSTOMER, Role.ADMIN]))
-  @Prop({
-    required: false,
-    type: Types.ObjectId,
-    ref: 'Role',
+    @Prop({
+    type: String,
+    enum: Object.values(Role),
     default: Role.CUSTOMER,
   })
-  role!: Types.ObjectId;
+  role!: Role;
   @Factory((faker) => faker?.person.jobTitle())
   @Prop()
   jobTitle!: string;

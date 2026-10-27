@@ -1,30 +1,41 @@
+import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+
+@Injectable()
 export class MailService {
+  private readonly logger = new Logger(MailService.name);
+  private transporter?: nodemailer.Transporter;
+
+  constructor() {
+    const host = process.env.MAIL_HOST;
+    if (!host) {
+      this.logger.warn('MAIL_HOST is not set: emails will not be sent');
+      return;
+    }
+    this.transporter = nodemailer.createTransport({
+      host,
+      port: Number(process.env.MAIL_PORT ?? 587),
+      secure: process.env.MAIL_SECURE === 'true',
+      auth: process.env.MAIL_USER
+        ? { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS }
+        : undefined,
+    });
+  }
+
   sendEmail = async (email: string, subject: string, text: string) => {
+    if (!this.transporter) {
+      return;
+    }
     try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          type: 'Bearer',
-          user: process.env.MAIL_USER,
-          pass: process.env.MAIL_PASS,
-          clientId: process.env.CLIENT_ID,
-          clientSecret: process.env.CLIENT_SECRET,
-          refreshToken: process.env.REFRESH_TOKEN,
-        },
-      } as any);
-      await transporter.sendMail({
-        from: process.env.USER,
+      await this.transporter.sendMail({
+        from: process.env.MAIL_FROM ?? process.env.MAIL_USER,
         to: email,
-        subject: subject,
-        text: text,
+        subject,
+        text,
       });
-      console.log('verification link has been sent to your email ');
+      this.logger.log(`Email sent to ${email}`);
     } catch (error) {
-      console.log(
-        error,
-        'could not send verificaton link to your email account',
-      );
+      this.logger.error(`Could not send email to ${email}`, error as Error);
     }
   };
 }

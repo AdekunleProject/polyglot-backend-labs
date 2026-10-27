@@ -5,6 +5,7 @@ import { UsersController } from './user.controller';
 import { UsersService } from './user.service';
 import { FileUpload } from 'src/aws/aws.file-upload';
 import { NotificationsModule } from 'src/notifications/notification.module';
+import { AdminBootstrapService } from './admin-bootstrap.service';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { NotificationsModule } from 'src/notifications/notification.module';
     ]),
   ],
   controllers: [UsersController],
-  providers: [UsersService, FileUpload],
+  providers: [UsersService, FileUpload, AdminBootstrapService],
   exports: [UsersService, MongooseModule],
 })
 export class UsersModule {}

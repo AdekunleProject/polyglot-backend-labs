@@ -59,3 +59,9 @@ lerna-debug.log*
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 .git-backup
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*tfplan
