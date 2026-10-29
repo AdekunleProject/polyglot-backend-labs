@@ -21,8 +21,8 @@ The MongoDB password is generated fresh each time.
 
 ## 3. Open it
 
-    kubectl port-forward svc/ecommerce-api 4000:4000
-    # http://localhost:4000/docs
+    kubectl port-forward svc/ecommerce-api 5000:5000
+    # http://localhost:5000/docs
 
 ## 4. Bad release on purpose, then roll back
 
