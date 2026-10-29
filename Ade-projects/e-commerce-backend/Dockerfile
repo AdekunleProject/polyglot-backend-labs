@@ -13,6 +13,7 @@ RUN pnpm prune --prod
 
 FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS runtime
 ENV NODE_ENV=production
+ENV PORT=4000
 WORKDIR /app
 RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 COPY --from=prune --chown=app:app /app/node_modules ./node_modules
