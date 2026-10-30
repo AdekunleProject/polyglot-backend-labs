@@ -40,7 +40,7 @@ module "eks" {
   }
 
   tags = {
-    Project   = "voting-capstone"
+    Project   = "ecommerce-backend"
     ManagedBy = "terraform"
   }
 }

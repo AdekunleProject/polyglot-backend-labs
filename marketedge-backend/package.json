@@ -21,6 +21,7 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
   },
   "dependencies": {
+    "@as-integrations/express5": "^1.1.2",
     "@nestjs/apollo": "^14.0.3",
     "@nestjs/bullmq": "^12.0.0",
     "@nestjs/common": "^12.0.1",

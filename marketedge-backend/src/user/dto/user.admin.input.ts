@@ -6,7 +6,8 @@ export class CreateAdminUserInput {
   @Field() username: string;
   @Field() email: string;
   @Field() password: string;
-  @Field(() => Role) role: Role;
+  @Field(() => Role, { nullable: true })
+  role?: Role;
   
 }
 
@@ -14,15 +15,16 @@ export class CreateAdminUserInput {
 export class UpdateAdminUserInput {
   @Field(() => ID) id: string;
   @Field({ nullable: true }) username?: string;
-  @Field({ nullable: true }) role?: string;
-}
+  @Field(() => Role, { nullable: true })
+  role?: Role;}
 
 @ObjectType()
 export class UserGraphType {
   @Field(() => ID) id: string;
   @Field() username: string;
   @Field() email: string;
-  @Field() role: string;
+  @Field(() => Role)
+  role: Role;
   @Field() isVerified: boolean;
   @Field({ nullable: true }) customerProfileLink?: string;
 }
