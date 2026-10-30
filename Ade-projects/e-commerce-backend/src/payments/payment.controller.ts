@@ -46,7 +46,11 @@ export class PaymentsController {
     @Headers('x-paystack-signature')
     signature: string,
   ) {
-    return this.paymentsService.handleWebhook(signature, req.body);
+    return this.paymentsService.handleWebhook(
+      signature,
+      req.rawBody,
+      req.body,
+    );
   }
 
   @Post('refund')

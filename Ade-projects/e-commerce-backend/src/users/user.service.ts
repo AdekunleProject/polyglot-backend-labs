@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import {
   Injectable,
   NotFoundException,
@@ -230,7 +231,7 @@ export class UsersService {
     if (existingUser) {
       throw new BadRequestException('User already exists');
     }
-    const defaultPassword = Math.random().toString(36).slice(-8);
+    const defaultPassword = randomBytes(9).toString('base64url');
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
     const user = new this.userModel({

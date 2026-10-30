@@ -5,6 +5,7 @@ import {
   forwardRef,
   Inject,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -32,12 +33,29 @@ const LOW_STOCK_THRESHOLD = 5;
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @Inject() private cartService: CartService,
     private readonly variantsService: VariantsService,
     private readonly notificationsService: NotificationsService,
   ) {}
+  private async restoreStock(
+    reserved: { variantId: string; quantity: number }[],
+  ) {
+    for (const item of reserved) {
+      try {
+        await this.variantsService.increaseStock(item.variantId, item.quantity);
+      } catch (error) {
+        this.logger.error(
+          `Could not restore stock for variant ${item.variantId}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+  }
+
   async create(userId: string, createOrderDto: CreateOrderDto) {
     const cart = await this.cartService.getCartForCheckout(userId);
     if (!createOrderDto.shippingAddress) {
@@ -83,32 +101,48 @@ export class OrdersService {
     }
 
     const total = subtotal;
-    const order = await this.orderModel.create({
-      user: userId,
-      items,
-      shippingAddress: createOrderDto.shippingAddress,
-      subtotal,
-      total,
-      status: OrderStatus.PENDING,
-      paymentStatus: PaymentStatus.PENDING,
-    });
 
-    // Stock previously was never actually decremented on checkout at all
-    // — VariantsService.decreaseStock() existed but nothing called it
-    // here. Doing that now, per item, and tracking anything that drops to
-    // or below LOW_STOCK_THRESHOLD so admins can be notified below.
-    for (const item of items) {
-      const updatedVariant = await this.variantsService.decreaseStock(
-        item.variantId.toString(),
-        item.quantity,
-      );
-      if (updatedVariant.stock <= LOW_STOCK_THRESHOLD) {
-        lowStockVariants.push({
-          name: item.productName,
-          sku: item.variantSku,
-          stock: updatedVariant.stock,
+    // Reserve the stock first, one atomic update per variant. If any item is
+    // short, or anything fails afterwards, what was taken is put back, so
+    // stock never leaks and two buyers can never both get the last unit.
+    const reserved: { variantId: string; quantity: number }[] = [];
+    try {
+      for (const item of items) {
+        const updatedVariant = await this.variantsService.decreaseStock(
+          item.variantId.toString(),
+          item.quantity,
+        );
+        reserved.push({
+          variantId: item.variantId.toString(),
+          quantity: item.quantity,
         });
+        if (updatedVariant.stock <= LOW_STOCK_THRESHOLD) {
+          lowStockVariants.push({
+            name: item.productName,
+            sku: item.variantSku,
+            stock: updatedVariant.stock,
+          });
+        }
       }
+    } catch (error) {
+      await this.restoreStock(reserved);
+      throw error;
+    }
+
+    let order;
+    try {
+      order = await this.orderModel.create({
+        user: userId,
+        items,
+        shippingAddress: createOrderDto.shippingAddress,
+        subtotal,
+        total,
+        status: OrderStatus.PENDING,
+        paymentStatus: PaymentStatus.PENDING,
+      });
+    } catch (error) {
+      await this.restoreStock(reserved);
+      throw error;
     }
 
     await this.cartService.clearCart(userId);

@@ -78,17 +78,32 @@ export class VariantsService {
     };
   }
 
+  // One atomic update: the stock check and the decrement happen together in
+  // the database, so two buyers can never both take the last unit.
   async decreaseStock(id: string, quantity: number) {
-    const variant = await this.findById(id);
+    const variant = await this.variantModel.findOneAndUpdate(
+      { _id: id, stock: { $gte: quantity } },
+      { $inc: { stock: -quantity } },
+      { new: true },
+    );
 
-    if (variant.stock < quantity) {
+    if (!variant) {
+      const exists = await this.variantModel.exists({ _id: id });
+      if (!exists) {
+        throw new NotFoundException('Variant not found.');
+      }
       throw new BadRequestException('Insufficient stock.');
     }
 
-    variant.stock -= quantity;
-
-    await variant.save();
-
     return variant;
+  }
+
+  // Gives stock back, used when an order could not be completed.
+  async increaseStock(id: string, quantity: number) {
+    return this.variantModel.findOneAndUpdate(
+      { _id: id },
+      { $inc: { stock: quantity } },
+      { new: true },
+    );
   }
 }

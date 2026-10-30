@@ -21,6 +21,7 @@ import { Order } from '../orders/schemas/order.schema';
 import { InitializePaymentDto } from './dto/initialize-payment.dto';
 import { PayStackService } from './paystack.service';
 import * as crypto from 'crypto';
+import { verifyPaystackSignature } from './paystack-signature';
 import { UsersService } from 'src/users/user.service';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { InitializeBankTransferDto } from './dto/initialize-bank-transfer.dto';
@@ -96,7 +97,7 @@ export class PaymentsService {
       const paystackResponse = await this.paystackService.initializeTransaction(
         {
           email: user.email,
-          amount: order.total * 100,
+          amount: Math.round(order.total * 100),
           reference,
           callback_url:
             dto.callbackUrl ??
@@ -192,6 +193,25 @@ export class PaymentsService {
           message: 'Payment failed.',
         };
       }
+      // The amount Paystack actually charged must match what we asked for.
+      const expectedAmount = Math.round(paymentInSession.amount * 100);
+      if (
+        Number(transaction.amount) !== expectedAmount ||
+        (transaction.currency &&
+          transaction.currency !== paymentInSession.currency)
+      ) {
+        paymentInSession.status = PaymentStatus.FAILED;
+        paymentInSession.gatewayResponse = transaction;
+
+        await paymentInSession.save({ session });
+
+        await session.commitTransaction();
+
+        return {
+          success: false,
+          message: 'Payment amount does not match the order.',
+        };
+      }
       paymentInSession.status = PaymentStatus.PAID;
       paymentInSession.gatewayTransactionId = transaction.id?.toString();
       paymentInSession.paymentMethod = transaction.channel;
@@ -240,16 +260,15 @@ export class PaymentsService {
       .sort({ createdAt: -1 });
   }
 
-  async handleWebhook(signature: string, payload: any) {
-    const hash = crypto
-      .createHmac(
-        'sha512',
-        this.configService.get<string>('PAYSTACK_SECRET_KEY')!,
-      )
-      .update(JSON.stringify(payload))
-      .digest('hex');
+  async handleWebhook(
+    signature: string,
+    rawBody: Buffer | undefined,
+    payload: any,
+  ) {
+    // Paystack signs the raw request bytes, not a re-serialised copy.
+    const secret = this.configService.getOrThrow<string>('PAYSTACK_SECRET_KEY');
 
-    if (hash !== signature) {
+    if (!verifyPaystackSignature(rawBody, signature, secret)) {
       throw new BadRequestException('Invalid webhook signature.');
     }
     if (payload.event !== 'charge.success') {

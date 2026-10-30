@@ -356,7 +356,11 @@ export class AuthService {
   async forgotPassword(email: string) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
-      throw new NotFoundException("email doesn't exist");
+      // Same answer as for a real account, so this endpoint cannot be used
+      // to find out which emails are registered.
+      return {
+        message: 'If that email is registered, a reset code has been sent.',
+      };
     }
     // Standardized to 15 minutes — was 2m30s, unusually short for a code
     // someone has to read from their inbox and type in by hand.
@@ -378,7 +382,7 @@ export class AuthService {
       `Your password reset code is ${code}. It expires in 15 minutes.`,
     );
     return {
-      message: 'A password reset code has been sent to your email',
+      message: 'If that email is registered, a reset code has been sent.',
     };
   }
 
