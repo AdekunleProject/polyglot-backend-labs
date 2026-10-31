@@ -116,7 +116,6 @@ export class AuthService {
       return {
         message: 'Thank you for signing up. Please verify your email.',
         customer: {
-          Role,
           ...userData,
           profileImage: resolvedProfileImage,
         },

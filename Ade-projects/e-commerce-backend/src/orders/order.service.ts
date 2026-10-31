@@ -66,14 +66,6 @@ export class OrdersService {
     }
     const items: OrderItem[] = [];
     let subtotal = 0;
-    // BUG FIX: order creation, cart clearing, and the return statement
-    // were all previously INSIDE this loop. For any cart with more than
-    // one item, the order got created after only the first iteration —
-    // with just that one item — then the cart was cleared and the
-    // function returned immediately. Every other item in the cart was
-    // silently dropped, not just left in the order but lost from the
-    // cart too, since clearCart() already ran. Moved everything below
-    // the loop so all items are actually collected first.
     const lowStockVariants: { name: string; sku: string; stock: number }[] = [];
     for (const cartItem of cart.items) {
       const variant = cartItem.variant as unknown as ProductVariant;

@@ -32,14 +32,6 @@ export class UsersService {
     private readonly fileUpload: FileUpload,
     private readonly notificationsService: NotificationsService,
   ) {}
-  // SECURITY FIX: this saved `data` straight into the User model with no
-  // password hashing at all — every account created through this
-  // endpoint had its plaintext password stored directly in the
-  // database. Compare to AuthService.signup(), which correctly does
-  // bcrypt.hash() before saving. As a second-order effect, login would
-  // never have worked for these accounts either, since
-  // AuthService.login() compares via bcrypt.compare(), which can't
-  // match against a plaintext value.
   async create(data: CreateUserDto) {
     try {
       const hashedPassword = await bcrypt.hash(data.password, 12);
