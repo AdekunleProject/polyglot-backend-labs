@@ -6,9 +6,9 @@ import { LocalRegisterInput, LocalLoginInput, AuthTokenResponse, SocialLoginInpu
 export class AuthResolver {
   constructor(private readonly authService: AuthService) {}
 
-  @Mutation(() => AuthTokenResponse)
+  @Mutation(() => String)
   async registerLocal(@Args('input') input: LocalRegisterInput) {
-    return await this.authService.registerLocal(input);
+    return this.authService.registerLocal(input);
   }
 
   @Mutation(() => Boolean)

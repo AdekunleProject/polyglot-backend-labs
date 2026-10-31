@@ -55,7 +55,7 @@ export class AuthService {
     });
 
     await this.emailService.sendVerificationEmail(user.email, code);
-    return this.generateTokens(user);
+    return 'Registration successful. Please check your email for the verification code.';
   }
 
   async verifyEmailOtp(email: string, otp: string): Promise<boolean> {
