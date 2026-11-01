@@ -1,54 +1,73 @@
 // src/market-edge/services/vip-intelligence.service.ts
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Customer } from '../schemas/customer.schema';
 import Redis from 'ioredis';
+import { PubSubEngine } from 'graphql-subscriptions';
+import { Customer } from '../schemas/customer.schema';
+import { PUB_SUB, REDIS_CLIENT } from '../../redis/redis.constants';
+
+export const VIP_SCORE_UPDATED = 'vipScoreUpdated';
+const CACHE_SECONDS = 3600;
+const HISTORY_LIMIT = 50;
+const MAX_AMOUNT = 1_000_000_000;
+
+export function assertValidTransaction(customerId: unknown, amount: unknown): void {
+  if (typeof customerId !== 'string' || customerId.trim() === '' || customerId.length > 100) {
+    throw new BadRequestException('customerId must be a non-empty string of at most 100 characters.');
+  }
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > MAX_AMOUNT) {
+    throw new BadRequestException('amount must be a positive number.');
+  }
+}
 
 @Injectable()
 export class VipIntelligenceService {
-  private redisClient: Redis;
-
-  constructor(@InjectModel(Customer.name) private customerModel: Model<Customer>) {
-    this.redisClient = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: 6379,
-      password: process.env.REDIS_PASSWORD,
-    });
-  }
+  constructor(
+    @InjectModel(Customer.name) private customerModel: Model<Customer>,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Inject(PUB_SUB) private readonly pubSub: PubSubEngine,
+  ) {}
 
   async getCachedVipScore(customerId: string): Promise<number> {
-    const cached = await this.redisClient.get(`vip:score:${customerId}`);
-    if (cached) return parseFloat(cached);
+    const key = `vip:score:${customerId}`;
+    const cached = await this.redis.get(key);
+    if (cached !== null) return parseFloat(cached);
 
     const customer = await this.customerModel.findOne({ customerId });
     const score = customer ? customer.currentVipScore : 0;
-    await this.redisClient.setex(`vip:score:${customerId}`, 3600, score);
+    await this.redis.setex(key, CACHE_SECONDS, String(score));
     return score;
   }
 
   async processTransactionAndCache(customerId: string, amount: number, branchId: string) {
-    // Atomically push, sort, and cap history entirely inside the MongoDB database engine
-    const updatedCustomer = await this.customerModel.findOneAndUpdate(
+    assertValidTransaction(customerId, amount);
+
+    // Push, sort and cap the history inside MongoDB in one atomic update.
+    const customer = await this.customerModel.findOneAndUpdate(
       { customerId },
       {
         $push: {
           recentTransactions: {
             $each: [{ amount, branchId, timestamp: Date.now() }],
             $sort: { timestamp: -1 },
-            $slice: 50, 
+            $slice: HISTORY_LIMIT,
           },
         },
       },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true },
     );
 
-    const score = updatedCustomer.recentTransactions.reduce((sum, tx) => sum + tx.amount, 0) * updatedCustomer.recentTransactions.length;
-    
-    // Persist calculated value and update cache concurrently
-    await this.customerModel.updateOne({ customerId }, { $set: { currentVipScore: score } });
-    await this.redisClient.setex(`vip:score:${customerId}`, 3600, score);
+    const history = customer.recentTransactions;
+    const score = history.reduce((sum, tx) => sum + tx.amount, 0) * history.length;
 
-    return { customerId, calculatedVipScore: score };
+    await this.customerModel.updateOne({ customerId }, { $set: { currentVipScore: score } });
+    await this.redis.setex(`vip:score:${customerId}`, CACHE_SECONDS, String(score));
+
+    const result = { customerId, calculatedVipScore: score };
+    // Published here so both paths (the GraphQL mutation and the Paystack
+    // webhook) notify subscribers.
+    await this.pubSub.publish(VIP_SCORE_UPDATED, { [VIP_SCORE_UPDATED]: result });
+    return result;
   }
 }

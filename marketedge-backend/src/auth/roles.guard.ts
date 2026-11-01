@@ -1,8 +1,8 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { GqlExecutionContext } from '@nestjs/graphql';
-import { ROLES_KEY } from './roles.decorator.js';
-import { Role } from './roles.enum.js';
+import { ROLES_KEY } from './roles.decorator';
+import { Role } from './roles.enum';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -21,8 +21,9 @@ export class RolesGuard implements CanActivate {
 
     if (!user || !user.role) throw new ForbiddenException('No operational roles detected');
 
-    const hasPermission = requiredRoles.includes(user.role);
-    if (!hasPermission) throw new ForbiddenException(`Requires roles: [${requiredRoles.join(', ')}]`);
+    if (!requiredRoles.includes(user.role)) {
+      throw new ForbiddenException(`Requires roles: [${requiredRoles.join(', ')}]`);
+    }
 
     return true;
   }

@@ -1,0 +1,55 @@
+# Image built and pushed by the GitHub Actions pipeline.
+# The tag is always the commit SHA and must be given on the command line:
+#   helm install marketedge helm/marketedge --set image.tag=<commit-sha>
+image:
+  repository: ghcr.io/adekunleproject/marketedge-backend
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 3000
+
+# Secret holding every sensitive value. Create it with scripts/create-secret.sh.
+secretName: marketedge-secrets
+
+config:
+  NODE_ENV: production
+  PORT: "3000"
+  REDIS_HOST: marketedge-redis
+  REDIS_PORT: "6379"
+  ADMIN_USERNAME: admin
+  ADMIN_EMAIL: admin@example.com
+  SMTP_HOST: smtp.mailtrap.io
+  SMTP_PORT: "2525"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# The autoscaler needs metrics-server installed in the cluster.
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# Demo databases. Data lives in emptyDir and is lost when a pod restarts.
+# For real data use MongoDB Atlas and a managed Redis.
+mongo:
+  image: mongo:7
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 768Mi }
+
+redis:
+  image: redis:7-alpine
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 192Mi }

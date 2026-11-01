@@ -5,31 +5,51 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { SmsTask } from '../schemas/sms-task.schema';
 import { BroadcastSmsInput } from '../dto/market-edge.types';
+import { chunk } from '../../common/chunk';
+
+export const SMS_QUEUE = 'sms-broadcast-queue';
+export const BROADCAST_BATCH_SIZE = 1000;
 
 @Injectable()
 export class SmsBroadcastService {
   constructor(
-    @InjectQueue('sms-broadcast-queue') private smsQueue: Queue,
+    @InjectQueue(SMS_QUEUE) private smsQueue: Queue,
     @InjectModel(SmsTask.name) private smsTaskModel: Model<SmsTask>,
   ) {}
 
+  /**
+   * Saves each message as a task and queues a job for it, in batches of 1,000
+   * so one large broadcast never builds one giant database write or Redis call.
+   * The job carries only the task id; the phone number and text stay in MongoDB.
+   */
   async enqueueMassBroadcast(input: BroadcastSmsInput) {
-    const documents = input.payload.map(item => ({
-      broadcastId: input.broadcastId,
-      phoneNumber: item.phone,
-      message: item.msg,
-      status: 'PENDING'
-    }));
+    let count = 0;
 
-    const insertedTasks = await this.smsTaskModel.insertMany(documents, { ordered: false });
+    for (const batch of chunk(input.payload, BROADCAST_BATCH_SIZE)) {
+      const tasks = await this.smsTaskModel.insertMany(
+        batch.map((item) => ({
+          broadcastId: input.broadcastId,
+          phoneNumber: item.phone,
+          message: item.msg,
+          status: 'PENDING',
+        })),
+      );
 
-    const jobs = insertedTasks.map(doc => ({
-      name: 'send-sms',
-      data: { taskId: doc._id.toString(), phone: doc.phoneNumber, msg: doc.message },
-      opts: { attempts: 3, backoff: { type: 'exponential', delay: 1000 } }
-    }));
+      await this.smsQueue.addBulk(
+        tasks.map((task) => ({
+          name: 'send-sms',
+          data: { taskId: String(task._id) },
+          opts: {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 1000 },
+            removeOnComplete: true,
+            removeOnFail: 1000,
+          },
+        })),
+      );
+      count += tasks.length;
+    }
 
-    await this.smsQueue.addBulk(jobs);
-    return { success: true, count: jobs.length };
+    return { success: true, count };
   }
 }

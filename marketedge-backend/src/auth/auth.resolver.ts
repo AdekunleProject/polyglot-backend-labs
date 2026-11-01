@@ -1,6 +1,12 @@
 import { Resolver, Mutation, Args } from '@nestjs/graphql';
 import { AuthService } from './auth.service';
-import { LocalRegisterInput, LocalLoginInput, AuthTokenResponse, SocialLoginInput, ResetPasswordConfirmInput } from './dto/auth.inputs';
+import {
+  LocalRegisterInput,
+  LocalLoginInput,
+  AuthTokenResponse,
+  SocialLoginInput,
+  ResetPasswordConfirmInput,
+} from './dto/auth.inputs';
 
 @Resolver()
 export class AuthResolver {
@@ -11,6 +17,11 @@ export class AuthResolver {
     return this.authService.registerLocal(input);
   }
 
+  @Mutation(() => String)
+  async resendVerification(@Args('email') email: string) {
+    return this.authService.resendVerification(email);
+  }
+
   @Mutation(() => Boolean)
   async verifyEmailRegistration(@Args('email') email: string, @Args('otpCode') otpCode: string) {
     return await this.authService.verifyEmailOtp(email, otpCode);
@@ -19,6 +30,11 @@ export class AuthResolver {
   @Mutation(() => AuthTokenResponse)
   async loginLocal(@Args('input') input: LocalLoginInput) {
     return await this.authService.loginLocal(input);
+  }
+
+  @Mutation(() => AuthTokenResponse)
+  async refreshTokens(@Args('refreshToken') refreshToken: string) {
+    return await this.authService.refreshTokens(refreshToken);
   }
 
   @Mutation(() => String)
@@ -33,11 +49,11 @@ export class AuthResolver {
 
   @Mutation(() => AuthTokenResponse)
   async loginWithGoogle(@Args('input') input: SocialLoginInput) {
-    return await this.authService.handleSocialStrategy(input.email, input.providerId, 'google', input.username);
+    return await this.authService.loginWithProvider('google', input.idToken);
   }
 
   @Mutation(() => AuthTokenResponse)
   async loginWithApple(@Args('input') input: SocialLoginInput) {
-    return await this.authService.handleSocialStrategy(input.email, input.providerId, 'apple', input.username);
+    return await this.authService.loginWithProvider('apple', input.idToken);
   }
 }

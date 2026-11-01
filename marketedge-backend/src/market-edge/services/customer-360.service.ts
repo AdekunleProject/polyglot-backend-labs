@@ -9,17 +9,17 @@ export class Customer360Service {
 
   async getCustomer360Profile(customerId: string) {
     const customer = await this.customerModel.findOne({ customerId });
-    if (!customer) throw new NotFoundException('Customer profile not mapped.');
+    if (!customer) throw new NotFoundException('Customer profile not found.');
 
+    const transactions = customer.recentTransactions ?? [];
     return {
       customerId: customer.customerId,
       currentVipScore: customer.currentVipScore,
-      recentTransactions: customer.recentTransactions,
+      recentTransactions: transactions,
       financialSnapshot: {
-        paystackId: 'pstk_link_' + customerId,
-        email: customerId + '@marketedge-client.com',
-        totalSpentLocalCurrency: customer.recentTransactions.reduce((s, t) => s + t.amount, 0),
-        status: 'active',
+        transactionCount: transactions.length,
+        totalSpentLocalCurrency: transactions.reduce((sum, t) => sum + t.amount, 0),
+        lastTransactionAt: transactions.length > 0 ? Math.max(...transactions.map((t) => t.timestamp)) : undefined,
       },
     };
   }

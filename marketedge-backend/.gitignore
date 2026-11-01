@@ -1,4 +1,10 @@
-dist/
-node_modules/
+/dist
+/node_modules
 .env
-schema.gql
+.env.*
+!.env.example
+docker-compose.override.yml
+coverage
+*.log
+*.tsbuildinfo
+src/schema.gql

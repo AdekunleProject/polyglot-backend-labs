@@ -1,17 +1,24 @@
-import { INestApplicationContext } from '@nestjs/common';
-import * as crypto from 'crypto';
+import type { INestApplication } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { VipIntelligenceService } from '../market-edge/services/vip-intelligence.service';
+import { REDIS_CLIENT } from '../redis/redis.constants';
+import { handlePaystackWebhook } from './paystack-webhook.logic';
 
-export async function processRawPaystackWebhook(appContext: INestApplicationContext, rawBody: string, signature: string) {
-  const secretKey = process.env.PAYSTACK_SECRET_KEY;
-  if (!secretKey) throw new Error('PAYSTACK_SECRET_KEY is not set');
-  
-  const hash = crypto.createHmac('sha512', secretKey).update(rawBody).digest('hex');
-  if (hash !== signature) throw new Error('HMAC verification authentication rejected.');
-
-  const payload = JSON.parse(rawBody);
-  if (payload.event === 'charge.success') {
-    const vipService = appContext.get(VipIntelligenceService);
-    await vipService.processTransactionAndCache(payload.data.customer.customer_code, payload.data.amount / 100, 'paystack-webhook');
-  }
+/** Express wrapper. Mount it after express.raw() so req.body is a Buffer. */
+export function createPaystackWebhookHandler(app: INestApplication) {
+  const logger = new Logger('PaystackWebhook');
+  return async (req: Request, res: Response) => {
+    const result = await handlePaystackWebhook(
+      Buffer.isBuffer(req.body) ? req.body : undefined,
+      req.headers['x-paystack-signature'] as string | undefined,
+      {
+        secret: process.env.PAYSTACK_SECRET_KEY,
+        redis: app.get(REDIS_CLIENT),
+        vip: app.get(VipIntelligenceService),
+        log: (message) => logger.error(message),
+      },
+    );
+    res.status(result.status).json(result.body);
+  };
 }

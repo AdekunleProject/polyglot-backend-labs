@@ -1,30 +1,31 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { AppModule } from './app.module';
 import * as express from 'express';
-import { processRawPaystackWebhook } from './webhooks/paystack-raw.handler';
+import helmet from 'helmet';
+import { AppModule } from './app.module';
+import { parseCorsOrigins } from './config/cors';
+import { createPaystackWebhookHandler } from './webhooks/paystack-raw.handler';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // bodyParser is off so the webhook route can read the raw body: the
+  // signature is computed over the exact bytes Paystack sent.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+
+  // CSP is off because the Apollo sandbox page loads its own scripts.
+  app.use(helmet({ contentSecurityPolicy: false }));
+  app.enableCors({ origin: parseCorsOrigins(process.env.CORS_ORIGIN, process.env.NODE_ENV) });
 
   app.use('/webhooks/paystack', express.raw({ type: 'application/json' }));
-  app.use('/webhooks/paystack', async (req: any, res: any) => {
-    try {
-      const signature = req.headers['x-paystack-signature'];
-      if (!signature) return res.status(400).send('Missing Authorization Header Signature');
+  app.use('/webhooks/paystack', createPaystackWebhookHandler(app));
 
-      const rawTextBody = req.body.toString('utf8');
-      await processRawPaystackWebhook(app, rawTextBody, signature);
-      
-      return res.status(200).send({ received: true });
-    } catch (error: any) {
-      return res.status(400).send({ error: error.message });
-    }
-  });
+  app.use(express.json({ limit: '5mb' }));
+  app.useGlobalPipes(
+    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+  );
 
-  app.use(express.json());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // Lets Kubernetes stop the pod cleanly: connections close, jobs finish.
+  app.enableShutdownHooks();
 
-  await app.listen(process.env.PORT || 3000);
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
-bootstrap();
+void bootstrap();

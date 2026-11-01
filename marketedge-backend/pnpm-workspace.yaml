@@ -1,5 +1,4 @@
 allowBuilds:
   '@apollo/protobufjs': false
-  bcrypt: false
+  bcrypt: true
   msgpackr-extract: false
-  pnpm: false

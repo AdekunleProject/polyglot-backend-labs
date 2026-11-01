@@ -1,11 +1,17 @@
 import { Resolver, Query, Mutation, Args, ID } from '@nestjs/graphql';
-import { UseGuards } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UseGuards } from '@nestjs/common';
 import { UserService } from './user.service';
 import { GqlAuthGuard } from '../auth/gql-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '../auth/roles.enum';
-import { CreateAdminUserInput, UpdateAdminUserInput, UserGraphType } from '../user/dto/user.admin.input';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { CreateAdminUserInput, UpdateAdminUserInput, UserGraphType } from './dto/user.admin.input';
+
+interface Actor {
+  sub: string;
+  role: Role;
+}
 
 @Resolver()
 @UseGuards(GqlAuthGuard, RolesGuard)
@@ -20,7 +26,14 @@ export class UserResolver {
 
   @Mutation(() => UserGraphType)
   @Roles(Role.ADMIN, Role.MANAGER)
-  async updateAdminUser(@Args('input') input: UpdateAdminUserInput) {
+  async updateAdminUser(
+    @CurrentUser() actor: Actor,
+    @Args('input') input: UpdateAdminUserInput,
+  ) {
+    // A manager could otherwise promote themselves (or anyone) to admin.
+    if (input.role !== undefined && actor.role !== Role.ADMIN) {
+      throw new ForbiddenException('Only an admin can change roles.');
+    }
     return await this.userService.updateAdminUser(input);
   }
 
@@ -38,7 +51,13 @@ export class UserResolver {
 
   @Mutation(() => Boolean)
   @Roles(Role.ADMIN)
-  async deleteUser(@Args('id', { type: () => ID }) id: string) {
+  async deleteUser(
+    @CurrentUser() actor: Actor,
+    @Args('id', { type: () => ID }) id: string,
+  ) {
+    if (actor.sub === id) {
+      throw new BadRequestException('You cannot delete your own account.');
+    }
     return await this.userService.deleteUser(id);
   }
 }

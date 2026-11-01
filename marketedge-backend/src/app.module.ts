@@ -1,4 +1,3 @@
-// src/app.module.ts
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { GraphQLModule } from '@nestjs/graphql';
@@ -10,54 +9,62 @@ import { join } from 'path';
 import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
 import { MarketEdgeModule } from './market-edge/market-edge.module';
+import { RedisModule } from './redis/redis.module';
+import { HealthController } from './health/health.controller';
+import { validateEnv } from './config/env.validation';
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 @Module({
   imports: [
-    // 1. Establish central environment variable loader configurations
-    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
+    // Fails at start-up if MONGODB_URI, JWT_SECRET or PAYSTACK_SECRET_KEY is missing.
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env', validate: validateEnv }),
 
-    // 2. Register global JWT token engine capabilities 
     JwtModule.registerAsync({
       global: true,
-      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET', 'super-secret-marketedge-key'),
+      useFactory: (config: ConfigService) => ({
+        // No default: a guessable fallback secret lets anyone forge tokens.
+        secret: config.getOrThrow<string>('JWT_SECRET'),
         signOptions: { expiresIn: '1d' },
       }),
     }),
 
-    // 3. Configure fully persistent asynchronous Mongoose connection pool
     MongooseModule.forRootAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (config: ConfigService) => ({
-        uri: config.get<string>('MONGODB_URI'),
+      useFactory: (config: ConfigService) => ({
+        uri: config.getOrThrow<string>('MONGODB_URI'),
       }),
     }),
 
-    // 4. Provision connection settings for your background BullMQ tasks
+    RedisModule,
+
     BullModule.forRootAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (config: ConfigService) => ({
+      useFactory: (config: ConfigService) => ({
         connection: {
           host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: 6379,
-          password: config.get<string>('REDIS_PASSWORD'),
+          port: Number(config.get<string>('REDIS_PORT', '6379')),
+          password: config.get<string>('REDIS_PASSWORD') || undefined,
         },
       }),
     }),
 
-    // 5. Build our unified single gateway schema file automatically
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
-      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      // In production the schema is built in memory. Writing src/schema.gql
+      // fails in a read-only, non-root container.
+      autoSchemaFile: isProduction ? true : join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
-      playground: true,
+      playground: !isProduction,
+      introspection: !isProduction,
+      // req for HTTP, extra for WebSocket subscriptions (see onConnect).
+      context: ({ req, extra }: { req?: unknown; extra?: unknown }) => ({ req, extra }),
       subscriptions: {
         'graphql-ws': {
-          onConnect: (ctx: any) => ({ extra: { connectionParams: ctx.connectionParams } }),
+          onConnect: ({ connectionParams, extra }: { connectionParams?: unknown; extra: unknown }) => {
+            (extra as Record<string, unknown>).connectionParams = connectionParams;
+          },
         },
       },
     }),
@@ -66,5 +73,6 @@ import { MarketEdgeModule } from './market-edge/market-edge.module';
     AuthModule,
     MarketEdgeModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}
