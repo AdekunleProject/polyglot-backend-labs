@@ -66,3 +66,14 @@ The API runs at `http://localhost:3000`.
 | limit | Items per page (max 50) | 10 |
 | search | Case-insensitive match on the title | none |
 | userId | Only notes by this user | none |
+
+## Testing
+
+Create the test database and apply migrations once:
+
+    docker exec -it pg-learn psql -U postgres -c "CREATE DATABASE notes_api_test;"
+    pnpm test:db:migrate
+
+Copy `.env.test.example` to `.env.test`, then run:
+
+    pnpm test:e2e

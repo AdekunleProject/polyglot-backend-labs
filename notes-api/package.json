@@ -22,7 +22,8 @@
     "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
     "migration:generate": "pnpm typeorm migration:generate",
     "migration:run": "pnpm typeorm migration:run",
-    "migration:revert": "pnpm typeorm migration:revert"
+    "migration:revert": "pnpm typeorm migration:revert",
+    "test:db:migrate": "DB_NAME=notes_api_test pnpm migration:run"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
@@ -50,6 +51,7 @@
     "@nestjs/mau": "^0.2.6",
     "@nestjs/schematics": "^12.0.0",
     "@nestjs/testing": "^12.0.1",
+    "@swc/core": "^1.16.21",
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
@@ -63,6 +65,7 @@
     "supertest": "^7.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.2",
+    "unplugin-swc": "^2.0.0",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^4.1.2"
   }
