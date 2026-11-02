@@ -1,10 +1,4 @@
-import {
-  IsInt,
-  IsNotEmpty,
-  IsPositive,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 export class CreateNoteDto {
   @IsString()
@@ -15,8 +9,4 @@ export class CreateNoteDto {
   @IsString()
   @IsNotEmpty()
   content: string;
-
-  @IsInt()
-  @IsPositive()
-  userId: number;
 }

@@ -1,93 +1,74 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository, FindOptionsWhere, ILike } from 'typeorm';
+import { FindOptionsWhere, ILike, Repository } from 'typeorm';
+import { AuthUser } from '../auth/auth-user.type';
 import { CreateNoteDto } from './dto/create-note.dto';
+import { FindNotesDto } from './dto/find-notes-query.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 import { Note } from './entities/note.entity';
-import { User } from '../users/entities/user.entity';
-import { FindNotesDto } from './dto/find-notes-query.dto';
 
 @Injectable()
 export class NotesService {
   constructor(
-    @InjectRepository(User)
-    private readonly usersRepository: Repository<User>,
     @InjectRepository(Note)
     private readonly notesRepository: Repository<Note>,
   ) {}
 
-  async create(createNoteDto: CreateNoteDto) {
-    const user = await this.usersRepository.findOneBy({
-      id: createNoteDto.userId,
-    });
-    if (!user) {
-      throw new NotFoundException(
-        `User with id ${createNoteDto.userId} not found`,
-      );
-    }
+  create(dto: CreateNoteDto, user: AuthUser) {
     const note = this.notesRepository.create({
-      title: createNoteDto.title,
-      content: createNoteDto.content,
-      user: { id: createNoteDto.userId },
+      title: dto.title,
+      content: dto.content,
+      user: { id: user.id },
     });
     return this.notesRepository.save(note);
   }
 
-  // Building where step by step means each filter only applies when it was sent.
-  // An empty where object means “no filter”.
-
-  // findAndCount runs the WHERE clause for both the page of rows and the count.
-  // So total is “how many rows match the filter”, not “how many rows exist”.
-  // With search=note 1, only a few titles match, so total shrinks and totalPages shrinks with it.
-  // That’s what you want: the caller pages through the filtered results, not the whole table.
-  async findAll(findNotesDto: FindNotesDto) {
+  async findAll(query: FindNotesDto, user: AuthUser) {
     const where: FindOptionsWhere<Note> = {};
-    if (findNotesDto.search) {
-      where.title = ILike(`${findNotesDto.search}`);
-    }
-    if (findNotesDto.userId) {
-      where.user = { id: findNotesDto.userId };
-    }
+    if (query.search) where.title = ILike(`%${query.search}%`);
+
+    // normal users only ever see their own notes; admins may filter by any user
+    const ownerId = user.role === 'admin' ? query.userId : user.id;
+    if (ownerId) where.user = { id: ownerId };
 
     const [items, total] = await this.notesRepository.findAndCount({
       where,
       relations: { user: true },
       order: { createdAt: 'DESC' },
-      take: findNotesDto.limit,
-      skip: (findNotesDto.page - 1) * findNotesDto.limit,
+      take: query.limit,
+      skip: (query.page - 1) * query.limit,
     });
-
     return {
       items,
       total,
-      page: findNotesDto.page,
-      limit: findNotesDto.limit,
-      totalPages: Math.ceil(total / findNotesDto.limit),
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.ceil(total / query.limit),
     };
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, user: AuthUser) {
     const note = await this.notesRepository.findOne({
       where: { id },
       relations: { user: true },
     });
-    if (!note) {
+    // someone else's note gets the same 404 as a missing one,
+    // so users can't discover which ids exist
+    if (!note || (user.role !== 'admin' && note.user.id !== user.id)) {
       throw new NotFoundException(`Note with id ${id} not found`);
     }
     return note;
   }
 
-  async update(id: number, updateNoteDto: UpdateNoteDto) {
-    const note = await this.findOne(id);
-    Object.assign(note, updateNoteDto);
+  async update(id: number, dto: UpdateNoteDto, user: AuthUser) {
+    const note = await this.findOne(id, user);
+    Object.assign(note, dto);
     return this.notesRepository.save(note);
   }
 
-  async remove(id: number) {
-    const result = await this.notesRepository.delete(id);
-    if (result.affected === 0) {
-      throw new NotFoundException(`Note with id ${id} not found`);
-    }
+  async remove(id: number, user: AuthUser) {
+    await this.findOne(id, user); // 404 + ownership check
+    await this.notesRepository.delete(id);
     return { deleted: true };
   }
 }

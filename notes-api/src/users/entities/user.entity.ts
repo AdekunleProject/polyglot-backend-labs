@@ -20,4 +20,10 @@ export class User {
   // @OneToMany creates no column. It only lets you load a user’s notes from the user side.
   @OneToMany(() => Note, (note) => note.user)
   notes: Note[];
+
+  @Column({ select: false })
+  password: string;
+
+  @Column({ type: 'varchar', length: 20, default: 'user' })
+  role: 'user' | 'admin';
 }
