@@ -72,6 +72,7 @@ __decorate([
     __metadata("design:type", Array)
 ], Post.prototype, "comments", void 0);
 exports.Post = Post = __decorate([
+    (0, typeorm_1.Index)('IDX_posts_published_createdAt', ['published', 'createdAt']),
     (0, typeorm_1.Entity)('posts')
 ], Post);
 //# sourceMappingURL=post.entity.js.map

@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinTable,
   ManyToMany,
   ManyToOne,
@@ -13,6 +14,7 @@ import { Comment } from '../../comments/entities/comment.entity';
 import { Tag } from '../../tags/entities/tag.entity';
 import { User } from '../../users/entities/user.entity';
 
+@Index('IDX_posts_published_createdAt', ['published', 'createdAt'])
 @Entity('posts')
 export class Post {
   @PrimaryGeneratedColumn()
