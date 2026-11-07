@@ -108,4 +108,57 @@ export class OrdersService {
       return manager.save(order);
     });
   }
+  async findMine(user: AuthUser) {
+    return this.ordersRepository.find({
+      where: { user: { id: user.id } },
+      relations: { items: { product: true } },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findOne(id: number, user: AuthUser) {
+    const order = await this.ordersRepository.findOne({
+      where: { id },
+      relations: { items: { product: true }, user: true },
+    });
+    // someone else's order gets the same 404 as a missing one
+    if (!order || (user.role !== 'admin' && order.user.id !== user.id)) {
+      throw new NotFoundException(`Order ${id} not found`);
+    }
+    return order;
+  }
+
+  async cancel(id: number, user: AuthUser) {
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id },
+        relations: { user: true },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!order || (user.role !== 'admin' && order.user.id !== user.id)) {
+        throw new NotFoundException(`Order ${id} not found`);
+      }
+      if (order.status === 'cancelled') {
+        throw new BadRequestException('Order is already cancelled');
+      }
+      const items = await manager.find(OrderItem, {
+        where: { order: { id } },
+        relations: { product: true },
+      });
+      // restore stock in a consistent order to avoid deadlocks
+      items.sort((a, b) => a.product.id - b.product.id);
+      for (const item of items) {
+        await manager.increment(
+          Product,
+          { id: item.product.id },
+          'stock',
+          item.quantity,
+        );
+      }
+
+      order.status = 'cancelled';
+      await manager.save(order);
+      return { id: order.id, status: order.status };
+    });
+  }
 }
