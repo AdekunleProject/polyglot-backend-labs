@@ -54,8 +54,9 @@ describe('AuthService.registerLocal', () => {
     expect(saved.isVerified).toBe(false);
     expect(saved.passwordHash).not.toBe('password123');
 
-    const sentCode = email.sendVerificationEmail.mock.calls[0][1];
-    expect(await bcrypt.compare(sentCode, saved.verifyOtpCode)).toBe(true);
+    const queuedEmail = email.sendVerificationEmail.mock.calls[0][0];
+    expect(queuedEmail.email).toBe('ada@example.com');
+    expect(await bcrypt.compare(queuedEmail.otp, saved.verifyOtpCode)).toBe(true);
   });
 
   it('refuses a duplicate username or email', async () => {
