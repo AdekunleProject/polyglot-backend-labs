@@ -12,6 +12,9 @@ import { LogSmsProvider, SMS_PROVIDER } from './sms/sms-provider';
 import { Customer, CustomerSchema } from './schemas/customer.schema';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { SmsTask, SmsTaskSchema } from './schemas/sms-task.schema';
+import { EMAIL_QUEUE } from './email/email-queue.service';
+import { EmailProcessor } from './email/email.processor';
+import { EmailQueueService } from './email/email-queue.service';
 
 @Module({
   imports: [
@@ -20,18 +23,21 @@ import { SmsTask, SmsTaskSchema } from './schemas/sms-task.schema';
       { name: Order.name, schema: OrderSchema },
       { name: SmsTask.name, schema: SmsTaskSchema },
     ]),
-    BullModule.registerQueue({ name: SMS_QUEUE }),
+    BullModule.registerQueue({ name: SMS_QUEUE }, { name: EMAIL_QUEUE }),
   ],
   providers: [
     MarketEdgeResolver,
     SmsBroadcastService,
     SmsProcessor,
     { provide: SMS_PROVIDER, useClass: LogSmsProvider },
+    EmailProcessor,
+  { provide: SMS_PROVIDER, useClass: LogSmsProvider },
     VipIntelligenceService,
     Customer360Service,
     EmailDispatchService,
+    EmailQueueService,
     OrderService,
   ],
-  exports: [EmailDispatchService, MongooseModule, VipIntelligenceService],
+  exports: [EmailDispatchService,EmailQueueService, MongooseModule, VipIntelligenceService],
 })
 export class MarketEdgeModule {}

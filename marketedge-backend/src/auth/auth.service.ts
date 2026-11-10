@@ -11,7 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { User } from '../user/schemas/user.schema';
-import { EmailDispatchService } from '../market-edge/services/email-dispatch.service';
+import { EmailQueueService } from '../market-edge/email/email-queue.service';
 import { LocalRegisterInput, LocalLoginInput, ResetPasswordConfirmInput } from './dto/auth.inputs';
 import { Role } from './roles.enum';
 import { SocialTokenVerifier } from './social-token-verifier';
@@ -40,7 +40,7 @@ export class AuthService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     private readonly jwtService: JwtService,
-    private readonly emailService: EmailDispatchService,
+    private readonly emailQueueService: EmailQueueService,
     private readonly socialVerifier: SocialTokenVerifier,
   ) {}
 
@@ -87,7 +87,10 @@ export class AuthService {
       verifyOtpAttempts: 0,
     });
 
-    await this.emailService.sendVerificationEmail(user.email, code);
+    await this.emailQueueService.sendVerificationEmail({
+      email: user.email,
+      otp: code,
+    });
     return REGISTER_MESSAGE;
   }
 
@@ -105,7 +108,10 @@ export class AuthService {
           },
         },
       );
-      await this.emailService.sendVerificationEmail(user.email, code);
+      await this.emailQueueService.sendVerificationEmail({
+        email: user.email,
+        otp: code,
+      });
     }
     return RECOVERY_MESSAGE;
   }
@@ -194,7 +200,10 @@ export class AuthService {
           },
         },
       );
-      await this.emailService.sendPasswordResetEmail(normalized, code);
+      await this.emailQueueService.sendPasswordResetEmail({
+        email: normalized,
+        otp: code,
+      });
     }
     return RECOVERY_MESSAGE;
   }

@@ -28,13 +28,14 @@ export class EmailDispatchService {
     await this.send(email, 'Reset your MarketEdge password', `<h3>Password reset</h3><p>Your reset code is: <b>${code}</b></p><p>It expires in 15 minutes. If you did not ask for this, ignore this email.</p>`);
   }
 
-  // A mail failure is logged and does not fail the request. Users can ask for
-  // a new code with the resendVerification mutation.
   private async send(to: string, subject: string, html: string) {
-    try {
-      await this.transporter.sendMail({ from: this.from, to, subject, html });
-    } catch (error) {
-      this.logger.error(`Could not send "${subject}" email`, error as Error);
-    }
+  try {
+    await this.transporter.sendMail({ from: this.from, to, subject, html });
+  } catch (error) {
+    this.logger.error(`Could not send "${subject}" email`, error as Error);
+
+    // Rethrow so BullMQ knows the job failed and can retry it.
+    throw error;
   }
+}
 }
