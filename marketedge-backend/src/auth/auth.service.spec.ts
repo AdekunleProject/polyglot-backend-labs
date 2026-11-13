@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+
+
 import {
   AuthService,
   LOCK_MINUTES,
@@ -14,15 +16,41 @@ function setup() {
     findOne: vi.fn(),
     findById: vi.fn(),
     create: vi.fn(),
-    updateOne: vi.fn().mockResolvedValue({}),
+    updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
   };
+
   const jwt = {
-    sign: vi.fn((payload: { type: string }, _options?: { expiresIn: string }) => `jwt:${payload.type}`),
-    verifyAsync: vi.fn(),
+    sign: vi.fn(
+      (payload: { type: string; jti?: string }, _options?: { expiresIn: string }) =>
+        payload.type === 'refresh'
+          ? `jwt:refresh:${payload.jti}`
+          : 'jwt:access',
+    ),
+
+    verifyAsync: vi.fn().mockResolvedValue({
+      type: 'refresh',
+      sub: 'u1',
+      sid: 'session-1',
+    }),
   };
-  const email = { sendVerificationEmail: vi.fn(), sendPasswordResetEmail: vi.fn() };
-  const social = { verifyGoogle: vi.fn(), verifyApple: vi.fn() };
-  const service = new AuthService(userModel as any, jwt as any, email as any, social as any);
+
+  const email = {
+    sendVerificationEmail: vi.fn(),
+    sendPasswordResetEmail: vi.fn(),
+  };
+
+  const social = {
+    verifyGoogle: vi.fn(),
+    verifyApple: vi.fn(),
+  };
+
+  const service = new AuthService(
+    userModel as any,
+    jwt as any,
+    email as any,
+    social as any,
+  );
+
   return { service, userModel, jwt, email, social };
 }
 
@@ -75,7 +103,11 @@ describe('AuthService.loginLocal', () => {
 
     const tokens = await service.loginLocal({ username: 'ada', password: 'correct-password' });
 
-    expect(tokens).toEqual({ accessToken: 'jwt:access', refreshToken: 'jwt:refresh', role: Role.CUSTOMER });
+    expect(tokens).toMatchObject({
+      accessToken: 'jwt:access',
+      role: Role.CUSTOMER,
+    });
+    expect(tokens.refreshToken).toMatch(/^jwt:refresh:/);
     expect(jwt.sign.mock.calls[0][1]).toEqual({ expiresIn: '15m' });
     expect(jwt.sign.mock.calls[1][1]).toEqual({ expiresIn: '7d' });
   });
@@ -125,25 +157,104 @@ describe('AuthService.loginLocal', () => {
   });
 });
 
-describe('AuthService.refreshTokens', () => {
-  it('issues a new pair for a valid refresh token', async () => {
-    const { service, userModel, jwt } = setup();
-    jwt.verifyAsync.mockResolvedValue({ type: 'refresh', sub: 'u1' });
+ describe('AuthService.refreshTokens', () => {
+  it('issues a new token pair for a valid refresh token', async () => {
+    const { service, userModel } = setup();
+
     userModel.findById.mockResolvedValue(await userDoc());
-    await expect(service.refreshTokens('r')).resolves.toMatchObject({ accessToken: 'jwt:access' });
+
+    const tokens = await service.refreshTokens('old-refresh-token');
+
+    expect(tokens.accessToken).toBe('jwt:access');
+    expect(tokens.refreshToken).toBeDefined();
+    expect(typeof tokens.refreshToken).toBe('string');
+    expect(tokens.role).toBe(Role.CUSTOMER);
   });
 
-  it('rejects an access token, a bad token and a deleted user', async () => {
-    const { service, userModel, jwt } = setup();
-    jwt.verifyAsync.mockResolvedValueOnce({ type: 'access', sub: 'u1' });
-    await expect(service.refreshTokens('a')).rejects.toThrow(UnauthorizedException);
+  it('rejects an access token', async () => {
+    const { service, jwt } = setup();
 
-    jwt.verifyAsync.mockRejectedValueOnce(new Error('expired'));
-    await expect(service.refreshTokens('b')).rejects.toThrow(UnauthorizedException);
+    jwt.verifyAsync.mockResolvedValueOnce({
+      type: 'access',
+      sub: 'u1',
+      sid: 'session-1',
+    });
 
-    jwt.verifyAsync.mockResolvedValueOnce({ type: 'refresh', sub: 'gone' });
+    await expect(
+      service.refreshTokens('access-token'),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects an invalid token', async () => {
+    const { service, jwt } = setup();
+
+    jwt.verifyAsync.mockRejectedValueOnce(
+      new Error('Invalid token'),
+    );
+
+    await expect(
+      service.refreshTokens('invalid-token'),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects a refresh token without a session ID', async () => {
+    const { service, jwt } = setup();
+
+    jwt.verifyAsync.mockResolvedValueOnce({
+      type: 'refresh',
+      sub: 'u1',
+    });
+
+    await expect(
+      service.refreshTokens('refresh-token'),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects a token belonging to a deleted user', async () => {
+    const { service, userModel } = setup();
+
     userModel.findById.mockResolvedValue(null);
-    await expect(service.refreshTokens('c')).rejects.toThrow(UnauthorizedException);
+
+    await expect(
+      service.refreshTokens('refresh-token'),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects a token belonging to an unverified user', async () => {
+    const { service, userModel } = setup();
+
+    userModel.findById.mockResolvedValue(
+      await userDoc({ isVerified: false }),
+    );
+
+    await expect(
+      service.refreshTokens('refresh-token'),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects a reused refresh token and revokes its session', async () => {
+    const { service, userModel } = setup();
+
+    userModel.findById.mockResolvedValue(await userDoc());
+
+    userModel.updateOne
+      .mockResolvedValueOnce({ modifiedCount: 0 })
+      .mockResolvedValueOnce({ modifiedCount: 1 });
+
+    await expect(
+      service.refreshTokens('reused-refresh-token'),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(userModel.updateOne).toHaveBeenLastCalledWith(
+      { _id: 'u1' },
+      {
+        $pull: {
+          refreshSessions: {
+            sessionId: 'session-1',
+          },
+        },
+      },
+    );
   });
 });
 

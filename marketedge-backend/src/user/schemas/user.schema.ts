@@ -3,6 +3,26 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { Role } from '../../auth/roles.enum';
 
+
+@Schema({ _id: false })
+export class RefreshSession {
+  @Prop({ required: true })
+  sessionId: string;
+
+  @Prop({ required: true })
+  tokenHash: string;
+
+  @Prop({ required: true })
+  expiresAt: Date;
+
+  @Prop({ required: true, default: Date.now })
+  createdAt: Date;
+
+  @Prop({ required: true, default: Date.now })
+  lastUsedAt: Date;
+}
+
+export const RefreshSessionSchema = SchemaFactory.createForClass(RefreshSession);
 @Schema({ timestamps: true })
 export class User extends Document {
   @Prop({ required: true, unique: true, trim: true })
@@ -53,6 +73,10 @@ export class User extends Document {
 
   @Prop({ required: false })
   lockedUntil?: Date;
+
+  // Hashed refresh tokens for active device sessions.
+  @Prop({ type: [RefreshSessionSchema], default: [] })
+  refreshSessions: RefreshSession[];
 
   // Identity link: connects the user account to a Customer analytics record.
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })

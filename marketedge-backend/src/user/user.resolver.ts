@@ -6,7 +6,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '../auth/roles.enum';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { CreateAdminUserInput, UpdateAdminUserInput, UserGraphType } from './dto/user.admin.input';
+import { CreateAdminUserInput, UpdateAdminUserInput, UserGraphType, CustomerProfileType, UpdateCustomerProfileInput}
+from './dto/user.admin.input';
 
 interface Actor {
   sub: string;
@@ -35,6 +36,21 @@ export class UserResolver {
       throw new ForbiddenException('Only an admin can change roles.');
     }
     return await this.userService.updateAdminUser(input);
+  }
+
+  @Query(() => CustomerProfileType)
+  @Roles(Role.CUSTOMER)
+  async myProfile(@CurrentUser() actor: Actor) {
+    return await this.userService.findById(actor.sub);
+  }
+
+  @Mutation(() => CustomerProfileType)
+  @Roles(Role.CUSTOMER)
+  async updateMyProfile(
+    @CurrentUser() actor: Actor,
+    @Args('input') input: UpdateCustomerProfileInput,
+  ) {
+    return await this.userService.updateCustomerProfile(actor.sub, input);
   }
 
   @Query(() => UserGraphType)

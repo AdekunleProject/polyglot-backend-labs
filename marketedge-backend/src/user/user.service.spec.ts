@@ -59,4 +59,91 @@ describe('UserService', () => {
     await service.updateAdminUser({ id: '64b7f0f2c2a4a1a1a1a1a1a1', role: Role.MANAGER });
     expect(model.findByIdAndUpdate.mock.calls[0][1]).toEqual({ $set: { role: Role.MANAGER } });
   });
+
+    it('updates a customer username and trims surrounding whitespace', async () => {
+    const { service, model } = setup();
+
+    const userId = '64b7f0f2c2a4a1a1a1a1a1a1';
+
+    model.findByIdAndUpdate.mockResolvedValue({
+      id: userId,
+      username: 'new-username',
+    });
+
+    await service.updateCustomerProfile(userId, {
+      username: '  new-username  ',
+    });
+
+    expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+      userId,
+      { $set: { username: 'new-username' } },
+      { returnDocument: 'after', runValidators: true },
+    );
+  });
+
+    it('rejects a customer username containing only whitespace', async () => {
+    const { service, model } = setup();
+
+    await expect(
+      service.updateCustomerProfile(
+        '64b7f0f2c2a4a1a1a1a1a1a1',
+        { username: '     ' },
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+    it('rejects an empty customer profile update', async () => {
+    const { service, model } = setup();
+
+    await expect(
+      service.updateCustomerProfile(
+        '64b7f0f2c2a4a1a1a1a1a1a1',
+        {},
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid customer ID', async () => {
+    const { service, model } = setup();
+
+    await expect(
+      service.updateCustomerProfile('invalid-id', {
+        username: 'new-username',
+      }),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a customer username that is already taken', async () => {
+    const { service, model } = setup();
+
+    model.findByIdAndUpdate.mockRejectedValue(
+      Object.assign(new Error('Duplicate key'), { code: 11000 }),
+    );
+
+    await expect(
+      service.updateCustomerProfile(
+        '64b7f0f2c2a4a1a1a1a1a1a1',
+        { username: 'existing-username' },
+      ),
+    ).rejects.toThrow(ConflictException);
+  });
+  
+  it('rejects an update when the customer does not exist', async () => {
+    const { service, model } = setup();
+
+    model.findByIdAndUpdate.mockResolvedValue(null);
+
+    await expect(
+      service.updateCustomerProfile(
+        '64b7f0f2c2a4a1a1a1a1a1a1',
+        { username: 'new-username' },
+      ),
+    ).rejects.toThrow(NotFoundException);
+  });
 });

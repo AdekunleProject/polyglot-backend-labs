@@ -78,4 +78,49 @@ export class UserService {
     if (!result) throw new NotFoundException('User not found.');
     return true;
   }
+
+  async updateCustomerProfile(
+  userId: string,
+  input: { username?: string },
+  ): Promise<User> {
+    if (!isValidObjectId(userId)) {
+      throw new NotFoundException('User not found.');
+    }
+
+    const changes: Record<string, unknown> = {};
+    if (input.username !== undefined) {
+      const username = input.username.trim();
+
+      if (!username) {
+        throw new BadRequestException('Username cannot be empty.');
+      }
+
+      changes.username = username;
+    }
+
+    if (Object.keys(changes).length === 0) {
+      throw new BadRequestException('Nothing to update.');
+    }
+
+    try {
+      const user = await this.userModel.findByIdAndUpdate(
+        userId,
+        { $set: changes },
+        { returnDocument: 'after', runValidators: true },
+      );
+
+      if (!user) {
+        throw new NotFoundException('User not found.');
+      }
+
+      return user;
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        throw new ConflictException('Username is already taken.');
+      }
+
+      throw error;
+    }
+  }
+
 }

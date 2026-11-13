@@ -7,7 +7,10 @@ function setup() {
     createAdminUser: vi.fn().mockResolvedValue({ id: 'new' }),
     updateAdminUser: vi.fn().mockResolvedValue({ id: 'u2' }),
     deleteUser: vi.fn().mockResolvedValue(true),
+    findById: vi.fn().mockResolvedValue({ id: 'customer-1' }),
+    updateCustomerProfile: vi.fn().mockResolvedValue({ id: 'customer-1' }),
   };
+
   return { service, resolver: new UserResolver(service as any) };
 }
 
@@ -41,5 +44,38 @@ describe('UserResolver', () => {
   it('lets an admin delete another account', async () => {
     const { resolver } = setup();
     await expect(resolver.deleteUser({ sub: 'a1', role: Role.ADMIN }, 'u2')).resolves.toBe(true);
+  });
+
+    it('allows a customer to retrieve their own profile', async () => {
+    const { resolver, service } = setup();
+
+    const actor = {
+      sub: 'customer-1',
+      role: Role.CUSTOMER,
+    };
+
+    await resolver.myProfile(actor);
+
+    expect(service.findById).toHaveBeenCalledWith('customer-1');
+  });
+
+  it('updates the authenticated customer profile using their own ID', async () => {
+    const { resolver, service } = setup();
+
+    const actor = {
+      sub: 'customer-1',
+      role: Role.CUSTOMER,
+    };
+
+    const input = {
+      username: 'new-username',
+    };
+
+    await resolver.updateMyProfile(actor, input);
+
+    expect(service.updateCustomerProfile).toHaveBeenCalledWith(
+      'customer-1',
+      input,
+    );
   });
 });

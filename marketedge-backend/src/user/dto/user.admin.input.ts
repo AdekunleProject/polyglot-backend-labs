@@ -8,6 +8,7 @@ import {
   IsString,
   MaxLength,
   MinLength,
+  Matches,
 } from 'class-validator';
 import { Role } from '../../auth/roles.enum';
 
@@ -20,6 +21,7 @@ export class CreateAdminUserInput {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
+  @Matches(/\S/, { message: 'Username cannot contain only whitespace.' })
   username: string;
 
   @Field()
@@ -50,6 +52,7 @@ export class UpdateAdminUserInput {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
+  @Matches(/\S/, { message: 'Username cannot contain only whitespace.' })
   username?: string;
 
   @Field(() => Role, { nullable: true })
@@ -77,4 +80,33 @@ export class UserGraphType {
 
   @Field({ nullable: true })
   customerProfileLink?: string;
+}
+
+@ObjectType()
+export class CustomerProfileType {
+  @Field(() => ID)
+  id: string;
+
+  @Field()
+  username: string;
+
+  @Field()
+  email: string;
+
+  @Field(() => Role)
+  role: Role;
+
+  @Field()
+  isVerified: boolean;
+}
+
+@InputType()
+export class UpdateCustomerProfileInput {
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  @Matches(/\S/, { message: 'Username cannot contain only whitespace.' })
+  username?: string;
 }

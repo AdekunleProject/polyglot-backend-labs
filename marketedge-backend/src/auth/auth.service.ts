@@ -8,7 +8,6 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
-import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { User } from '../user/schemas/user.schema';
 import { EmailQueueService } from '../market-edge/email/email-queue.service';
@@ -16,6 +15,7 @@ import { LocalRegisterInput, LocalLoginInput, ResetPasswordConfirmInput } from '
 import { Role } from './roles.enum';
 import { SocialTokenVerifier } from './social-token-verifier';
 import { generateOtp, normalizeEmail } from './otp';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 
 export const MAX_OTP_ATTEMPTS = 5;
 export const MAX_LOGIN_ATTEMPTS = 5;
@@ -44,28 +44,117 @@ export class AuthService {
     private readonly socialVerifier: SocialTokenVerifier,
   ) {}
 
-  async generateTokens(user: User) {
-    const base = { sub: String(user._id), username: user.username, role: user.role };
-    return {
-      accessToken: this.jwtService.sign({ ...base, type: 'access' }, { expiresIn: '15m' }),
-      refreshToken: this.jwtService.sign({ ...base, type: 'refresh' }, { expiresIn: '7d' }),
-      role: user.role,
-    };
+    private hashRefreshToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 
-  /** Trades a valid refresh token for a new pair. Role and status are re-read from the database. */
+  private createTokenPair(user: User, sessionId: string) {
+    const base = {
+      sub: String(user._id),
+      username: user.username,
+      role: user.role,
+    };
+
+    const accessToken = this.jwtService.sign(
+      { ...base, type: 'access' },
+      { expiresIn: '15m' },
+    );
+
+    const refreshToken = this.jwtService.sign(
+      { ...base, type: 'refresh', sid: sessionId, jti: randomUUID() },
+      { expiresIn: '7d' },
+    );
+
+    return { accessToken, refreshToken, role: user.role };
+  }
+
+  async generateTokens(user: User) {
+    const sessionId = randomUUID();
+    const tokens = this.createTokenPair(user, sessionId);
+    const now = new Date();
+    // Remove expired sessions before adding this new device session.
+    await this.userModel.updateOne(
+      { _id: user._id },
+      { $pull: { refreshSessions: { expiresAt: { $lte: now } } } },
+    );
+    await this.userModel.updateOne(
+      { _id: user._id },
+      {
+        $push: {
+          refreshSessions: {
+            sessionId,
+            tokenHash: this.hashRefreshToken(tokens.refreshToken),
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            createdAt: now,
+            lastUsedAt: now,
+          },
+        },
+      },
+    );
+
+    return tokens;
+  }
+
+  /** Rotates a refresh token; the previous token becomes unusable. */
   async refreshTokens(refreshToken: string) {
-    let payload: { type?: string; sub?: string };
+    let payload: { type?: string; sub?: string; sid?: string };
+
     try {
       payload = await this.jwtService.verifyAsync(refreshToken);
     } catch {
       throw new UnauthorizedException('Invalid refresh token.');
     }
-    if (payload.type !== 'refresh') throw new UnauthorizedException('Invalid refresh token.');
+
+    if (payload.type !== 'refresh' || !payload.sub || !payload.sid) {
+      throw new UnauthorizedException('Invalid refresh token.');
+    }
 
     const user = await this.userModel.findById(payload.sub);
-    if (!user || !user.isVerified) throw new UnauthorizedException('Invalid refresh token.');
-    return this.generateTokens(user);
+
+    if (!user || !user.isVerified) {
+      throw new UnauthorizedException('Invalid refresh token.');
+    }
+
+    const now = new Date();
+    const oldHash = this.hashRefreshToken(refreshToken);
+    const tokens = this.createTokenPair(user, payload.sid);
+    const newHash = this.hashRefreshToken(tokens.refreshToken);
+
+    // Compare-and-swap: only the request holding the currently stored token
+    // hash can rotate this session.
+    const result = await this.userModel.updateOne(
+      {
+        _id: user._id,
+        refreshSessions: {
+          $elemMatch: {
+            sessionId: payload.sid,
+            tokenHash: oldHash,
+            expiresAt: { $gt: now },
+          },
+        },
+      },
+      {
+        $set: {
+          'refreshSessions.$.tokenHash': newHash,
+          'refreshSessions.$.expiresAt': new Date(
+            Date.now() + 7 * 24 * 60 * 60 * 1000,
+          ),
+          'refreshSessions.$.lastUsedAt': now,
+        },
+      },
+    );
+
+    if (result.modifiedCount !== 1) {
+      // A previously rotated token was reused. Revoke that device session.
+      await this.userModel.updateOne(
+        { _id: user._id },
+        { $pull: { refreshSessions: { sessionId: payload.sid } } },
+      );
+
+      throw new UnauthorizedException('Invalid refresh token.');
+    }
+
+    return tokens;
   }
 
   async registerLocal(input: LocalRegisterInput) {
@@ -233,6 +322,7 @@ export class AuthService {
           passwordHash: await bcrypt.hash(input.newPassword, 12),
           resetOtpAttempts: 0,
           failedLoginAttempts: 0,
+          refreshSessions: [],
         },
         $unset: { resetOtpCode: '', resetOtpExpiresAt: '', lockedUntil: '' },
       },
