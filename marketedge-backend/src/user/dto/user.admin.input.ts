@@ -10,7 +10,7 @@ import {
   MinLength,
   Matches,
 } from 'class-validator';
-import { Role } from '../../auth/roles.enum';
+import { Role } from '../../auth/enum/roles.enum';
 
 // The global ValidationPipe uses `whitelist: true`, which silently removes any
 // field that has no class-validator decorator. Every field below therefore

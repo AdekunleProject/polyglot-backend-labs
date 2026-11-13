@@ -1,4 +1,7 @@
 import { Resolver, Mutation, Args } from '@nestjs/graphql';
+import { UseGuards } from '@nestjs/common';
+import { GqlAuthGuard } from './guards/gql-auth.guard';
+import { CurrentUser } from './decorators/current-user.decorator';
 import { AuthService } from './auth.service';
 import {
   LocalRegisterInput,
@@ -6,6 +9,7 @@ import {
   AuthTokenResponse,
   SocialLoginInput,
   ResetPasswordConfirmInput,
+  ChangePasswordInput,
 } from './dto/auth.inputs';
 
 @Resolver()
@@ -47,6 +51,15 @@ export class AuthResolver {
     return await this.authService.verifyResetAndMutatePassword(input);
   }
 
+  @UseGuards(GqlAuthGuard)
+  @Mutation(() => Boolean)
+  async changePassword(
+    @CurrentUser() actor: { sub: string },
+    @Args('input') input: ChangePasswordInput,
+  ) {
+    return this.authService.changePassword(actor.sub, input);
+  }
+
   @Mutation(() => AuthTokenResponse)
   async loginWithGoogle(@Args('input') input: SocialLoginInput) {
     return await this.authService.loginWithProvider('google', input.idToken);
@@ -55,5 +68,21 @@ export class AuthResolver {
   @Mutation(() => AuthTokenResponse)
   async loginWithApple(@Args('input') input: SocialLoginInput) {
     return await this.authService.loginWithProvider('apple', input.idToken);
+  }
+
+  @UseGuards(GqlAuthGuard)
+  @Mutation(() => Boolean)
+  async logout(
+    @CurrentUser() actor: { sub: string; sid: string },
+  ) {
+    return this.authService.logout(actor.sub, actor.sid);
+  }
+
+  @UseGuards(GqlAuthGuard)
+  @Mutation(() => Boolean)
+  async logoutAll(
+    @CurrentUser() actor: { sub: string },
+  ) {
+    return this.authService.logoutAll(actor.sub);
   }
 }

@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { UserService } from './user.service';
-import { Role } from '../auth/roles.enum';
+import { Role } from '../auth/enum/roles.enum';
 
 function setup() {
   const model = {

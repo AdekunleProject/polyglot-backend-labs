@@ -1,7 +1,7 @@
 // src/user/schemas/user.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Role } from '../../auth/roles.enum';
+import { Role } from '../../auth/enum/roles.enum';
 
 
 @Schema({ _id: false })

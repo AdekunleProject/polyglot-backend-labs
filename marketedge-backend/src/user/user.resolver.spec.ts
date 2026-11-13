@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { UserResolver } from './user.resolver';
-import { Role } from '../auth/roles.enum';
+import { Role } from '../auth/enum/roles.enum';
 
 function setup() {
   const service = {

@@ -69,6 +69,21 @@ export class ResetPasswordConfirmInput {
   newPassword: string;
 }
 
+@InputType()
+export class ChangePasswordInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  currentPassword: string;
+
+  @Field()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  newPassword: string;
+}
+
 @ObjectType()
 export class AuthTokenResponse {
   @Field()

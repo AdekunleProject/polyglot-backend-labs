@@ -1,7 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { RolesGuard } from './roles.guard';
-import { Role } from './roles.enum';
-import { graphqlContext } from '../common/test-utils';
+import { Role } from '../enum/roles.enum';
+import { graphqlContext } from '../../common/test-utils';
 
 function guardFor(required: Role[] | undefined) {
   const reflector = { getAllAndOverride: vi.fn().mockReturnValue(required) };

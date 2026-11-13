@@ -15,9 +15,11 @@ import { SmsTask, SmsTaskSchema } from './schemas/sms-task.schema';
 import { EMAIL_QUEUE } from './email/email-queue.service';
 import { EmailProcessor } from './email/email.processor';
 import { EmailQueueService } from './email/email-queue.service';
+import { UserModule } from '../user/user.module';
 
 @Module({
   imports: [
+    UserModule,
     MongooseModule.forFeature([
       { name: Customer.name, schema: CustomerSchema },
       { name: Order.name, schema: OrderSchema },

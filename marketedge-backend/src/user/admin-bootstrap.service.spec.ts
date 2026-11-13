@@ -1,6 +1,6 @@
 import * as bcrypt from 'bcrypt';
 import { AdminBootstrapService } from './admin-bootstrap.service';
-import { Role } from '../auth/roles.enum';
+import { Role } from '../auth/enum/roles.enum';
 
 function setup(env: Record<string, string>, adminExists: boolean) {
   const model = { exists: vi.fn().mockResolvedValue(adminExists ? { _id: 'a' } : null), create: vi.fn() };

@@ -11,8 +11,9 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { User } from '../user/schemas/user.schema';
 import { EmailQueueService } from '../market-edge/email/email-queue.service';
-import { LocalRegisterInput, LocalLoginInput, ResetPasswordConfirmInput } from './dto/auth.inputs';
-import { Role } from './roles.enum';
+import { LocalRegisterInput, LocalLoginInput, ResetPasswordConfirmInput, ChangePasswordInput, } 
+from './dto/auth.inputs';
+import { Role } from './enum/roles.enum';
 import { SocialTokenVerifier } from './social-token-verifier';
 import { generateOtp, normalizeEmail } from './otp';
 import { createHash, randomBytes, randomUUID } from 'crypto';
@@ -56,7 +57,7 @@ export class AuthService {
     };
 
     const accessToken = this.jwtService.sign(
-      { ...base, type: 'access' },
+      { ...base, type: 'access', sid: sessionId },
       { expiresIn: '15m' },
     );
 
@@ -327,6 +328,92 @@ export class AuthService {
         $unset: { resetOtpCode: '', resetOtpExpiresAt: '', lockedUntil: '' },
       },
     );
+    return true;
+  }
+
+  async changePassword(
+    userId: string,
+    input: ChangePasswordInput,
+  ): Promise<boolean> {
+    const user = await this.userModel.findById(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid user session.');
+    }
+
+    if (!user.passwordHash) {
+      throw new BadRequestException(
+        'This account does not have a password. Please use your social login provider.',
+      );
+    }
+
+    const isMatch = await bcrypt.compare(
+      input.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect.');
+    }
+
+    if (input.currentPassword === input.newPassword) {
+      throw new BadRequestException(
+        'Your new password must be different from your current password.',
+      );
+    }
+
+    const newPasswordHash = await bcrypt.hash(input.newPassword, 12);
+    const result = await this.userModel.updateOne(
+      {
+        _id: user._id,
+        passwordHash: user.passwordHash,
+      },
+      {
+        $set: {
+          passwordHash: newPasswordHash,
+          refreshSessions: [],
+          failedLoginAttempts: 0,
+        },
+        $unset: {
+          lockedUntil: '',
+        },
+      },
+    );
+    if (result.modifiedCount !== 1) {
+      throw new UnauthorizedException(
+        'Password could not be changed. Please try again.',
+      );
+    }
+    return true;
+  };
+
+  async logout(userId: string, sessionId: string): Promise<boolean> {
+    if (!sessionId) {
+      throw new UnauthorizedException('Invalid user session.');
+    }
+
+    const result = await this.userModel.updateOne(
+      { _id: userId },
+      { $pull: { refreshSessions: { sessionId } } },
+    );
+
+    if (result.matchedCount !== 1) {
+      throw new UnauthorizedException('Invalid user session.');
+    }
+
+    return true;
+  }
+
+  async logoutAll(userId: string): Promise<boolean> {
+    const result = await this.userModel.updateOne(
+      { _id: userId },
+      { $set: { refreshSessions: [] } },
+    );
+
+    if (result.matchedCount !== 1) {
+      throw new UnauthorizedException('Invalid user session.');
+    }
+
     return true;
   }
 

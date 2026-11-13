@@ -9,7 +9,7 @@ import {
   MAX_OTP_ATTEMPTS,
   RECOVERY_MESSAGE,
 } from './auth.service';
-import { Role } from './roles.enum';
+import { Role } from './enum/roles.enum';
 
 function setup() {
   const userModel = {
@@ -371,5 +371,149 @@ describe('AuthService.loginWithProvider', () => {
     expect(existing.appleId).toBe('a-1');
     expect(existing.isVerified).toBe(true);
     expect(existing.save).toHaveBeenCalled();
+  });
+
+  describe('AuthService.changePassword', () => {
+    it('changes the password and clears all refresh sessions', async () => {
+      const { service, userModel } = setup();
+      const user = await userDoc();
+
+      userModel.findById.mockResolvedValue(user);
+
+      const result = await service.changePassword('u1', {
+        currentPassword: 'correct-password',
+        newPassword: 'new-secure-password',
+      });
+
+      expect(result).toBe(true);
+
+      const update = userModel.updateOne.mock.calls[0];
+
+      expect(update[0]).toEqual({
+        _id: user._id,
+        passwordHash: user.passwordHash,
+      });
+
+      expect(update[1].$set.refreshSessions).toEqual([]);
+      expect(update[1].$set.failedLoginAttempts).toBe(0);
+
+      const newHash = update[1].$set.passwordHash;
+
+      expect(newHash).not.toBe('new-secure-password');
+      expect(await bcrypt.compare('new-secure-password', newHash)).toBe(true);
+    });
+
+    it('rejects an incorrect current password', async () => {
+      const { service, userModel } = setup();
+
+      userModel.findById.mockResolvedValue(await userDoc());
+
+      await expect(
+        service.changePassword('u1', {
+          currentPassword: 'wrong-password',
+          newPassword: 'new-secure-password',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(userModel.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects accounts without a password hash', async () => {
+      const { service, userModel } = setup();
+
+      userModel.findById.mockResolvedValue(
+        await userDoc({ passwordHash: undefined }),
+      );
+
+      await expect(
+        service.changePassword('u1', {
+          currentPassword: 'correct-password',
+          newPassword: 'new-secure-password',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(userModel.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects using the current password as the new password', async () => {
+      const { service, userModel } = setup();
+
+      userModel.findById.mockResolvedValue(await userDoc());
+
+      await expect(
+        service.changePassword('u1', {
+          currentPassword: 'correct-password',
+          newPassword: 'correct-password',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(userModel.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the password changes concurrently', async () => {
+      const { service, userModel } = setup();
+
+      userModel.findById.mockResolvedValue(await userDoc());
+      userModel.updateOne.mockResolvedValue({ modifiedCount: 0 });
+
+      await expect(
+        service.changePassword('u1', {
+          currentPassword: 'correct-password',
+          newPassword: 'new-secure-password',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('AuthService.logout', () => {
+    it('removes only the current device session', async () => {
+      const { service, userModel } = setup();
+
+      userModel.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+      const result = await service.logout('u1', 'session-123');
+
+      expect(result).toBe(true);
+      expect(userModel.updateOne).toHaveBeenCalledWith(
+        { _id: 'u1' },
+        { $pull: { refreshSessions: { sessionId: 'session-123' } } },
+      );
+    });
+
+    it('rejects when the user session does not exist', async () => {
+      const { service, userModel } = setup();
+
+      userModel.updateOne.mockResolvedValue({ matchedCount: 0 });
+
+      await expect(
+        service.logout('u1', 'invalid-session'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('AuthService.logoutAll', () => {
+    it('removes all refresh sessions for the user', async () => {
+      const { service, userModel } = setup();
+
+      userModel.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+      const result = await service.logoutAll('u1');
+
+      expect(result).toBe(true);
+      expect(userModel.updateOne).toHaveBeenCalledWith(
+        { _id: 'u1' },
+        { $set: { refreshSessions: [] } },
+      );
+    });
+
+    it('rejects when the user does not exist', async () => {
+      const { service, userModel } = setup();
+
+      userModel.updateOne.mockResolvedValue({ matchedCount: 0 });
+
+      await expect(
+        service.logoutAll('u1'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
   });
 });

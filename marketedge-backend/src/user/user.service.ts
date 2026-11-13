@@ -10,7 +10,7 @@ import { Model, isValidObjectId } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { User } from './schemas/user.schema';
 import { CreateAdminUserInput, UpdateAdminUserInput } from './dto/user.admin.input';
-import { Role } from '../auth/roles.enum';
+import { Role } from '../auth/enum/roles.enum';
 import { normalizeEmail } from '../auth/otp';
 
 @Injectable()
