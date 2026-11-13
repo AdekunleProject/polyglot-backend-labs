@@ -53,14 +53,39 @@ describe('UserService', () => {
     await expect(service.updateAdminUser({ id: '64b7f0f2c2a4a1a1a1a1a1a1' })).rejects.toThrow(BadRequestException);
   });
 
-  it('updates only the fields that were sent', async () => {
+  it('updates only the fields that were sent and enables validators', async () => {
     const { service, model } = setup();
+
     model.findByIdAndUpdate.mockResolvedValue({ id: 'u' });
-    await service.updateAdminUser({ id: '64b7f0f2c2a4a1a1a1a1a1a1', role: Role.MANAGER });
-    expect(model.findByIdAndUpdate.mock.calls[0][1]).toEqual({ $set: { role: Role.MANAGER } });
+
+    await service.updateAdminUser({
+      id: '64b7f0f2c2a4a1a1a1a1a1a1',
+      role: Role.MANAGER,
+    });
+
+    expect(model.findByIdAndUpdate).toHaveBeenCalledWith(
+      '64b7f0f2c2a4a1a1a1a1a1a1',
+      { $set: { role: Role.MANAGER } },
+      { returnDocument: 'after', runValidators: true },
+    );
   });
 
-    it('updates a customer username and trims surrounding whitespace', async () => {
+  it('rejects an admin username that is already taken', async () => {
+    const { service, model } = setup();
+
+    model.findByIdAndUpdate.mockRejectedValue(
+      Object.assign(new Error('Duplicate key'), { code: 11000 }),
+    );
+
+    await expect(
+      service.updateAdminUser({
+        id: '64b7f0f2c2a4a1a1a1a1a1a1',
+        username: 'existing-username',
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('updates a customer username and trims surrounding whitespace', async () => {
     const { service, model } = setup();
 
     const userId = '64b7f0f2c2a4a1a1a1a1a1a1';
@@ -81,7 +106,7 @@ describe('UserService', () => {
     );
   });
 
-    it('rejects a customer username containing only whitespace', async () => {
+  it('rejects a customer username containing only whitespace', async () => {
     const { service, model } = setup();
 
     await expect(

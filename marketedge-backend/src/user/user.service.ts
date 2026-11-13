@@ -41,22 +41,43 @@ export class UserService {
   }
 
   async updateAdminUser(input: UpdateAdminUserInput): Promise<User> {
-    if (!isValidObjectId(input.id)) throw new NotFoundException('User not found.');
+    if (!isValidObjectId(input.id)) {
+      throw new NotFoundException('User not found.');
+    }
 
     const changes: Record<string, unknown> = {};
-    if (input.username !== undefined) changes.username = input.username.trim();
-    if (input.role !== undefined) changes.role = input.role;
+
+    if (input.username !== undefined) {
+      changes.username = input.username.trim();
+    }
+
+    if (input.role !== undefined) {
+      changes.role = input.role;
+    }
+
     if (Object.keys(changes).length === 0) {
       throw new BadRequestException('Nothing to update.');
     }
 
-    const user = await this.userModel.findByIdAndUpdate(
-      input.id,
-      { $set: changes },
-      { returnDocument: 'after' },
-    );
-    if (!user) throw new NotFoundException('User not found.');
-    return user;
+    try {
+      const user = await this.userModel.findByIdAndUpdate(
+        input.id,
+        { $set: changes },
+        { returnDocument: 'after', runValidators: true },
+      );
+
+      if (!user) {
+        throw new NotFoundException('User not found.');
+      }
+
+      return user;
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        throw new ConflictException('Username is already taken.');
+      }
+
+      throw error;
+    }
   }
 
   async findById(id: string): Promise<User> {
