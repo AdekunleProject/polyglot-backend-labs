@@ -225,6 +225,20 @@ A Helm chart is included under `helm/marketedge`, with application deployment se
 
 The bundled MongoDB and Redis chart configuration is intended as a starting point, not a production-grade data-platform setup. For a real environment, use appropriately managed database and Redis services, persistent storage, backups, network restrictions, secret management, monitoring and resource limits. The chart has not been represented here as a live production deployment.
 
+### Deploying to AWS EKS
+
+The `terraform/` folder builds an EKS cluster (`marketedge-eks`, eu-north-1, two `m7i-flex.large` nodes in the default VPC, about 38 resources and roughly 10 minutes). The Helm chart then installs the API with a demo MongoDB and Redis. The full step-by-step guide, including how to destroy everything afterwards, is in [`docs/deploy.md`](docs/deploy.md).
+
+```bash
+cd terraform && terraform init && terraform apply       # build the cluster
+aws eks update-kubeconfig --region eu-north-1 --name marketedge-eks
+cd .. && PAYSTACK_SECRET_KEY=sk_test_... ADMIN_PASSWORD='...' scripts/create-secret.sh
+helm upgrade --install marketedge helm/marketedge --set image.tag=<commit-sha> --wait --timeout 5m
+kubectl port-forward svc/marketedge-api 3000:3000       # then curl /health and /ready
+```
+
+`scripts/deploy-rehearsal.sh <commit-sha>` runs the install, the health checks and a deliberately bad release followed by a `helm rollback`, and writes the output to `deploy-rehearsal.log`. The cluster costs roughly 0.35 USD per hour, so destroy it afterwards with `helm uninstall marketedge` and `terraform destroy`.
+
 ## Security notes
 
 - Keep JWT, database, SMTP, social-provider and payment-provider secrets outside source control.
