@@ -22,8 +22,7 @@ A REST API for an online store, built with **NestJS, TypeScript and MongoDB**. I
 
 ## What it does
 
-| Area | What it provides |
-| --- | --- |
+
 | Auth | Sign-up with email verification, login, refresh tokens, logout, forgot and reset password, Google sign-in |
 | Users and roles | Two roles, `customer` and `admin`, enforced by JWT and role guards |
 | Catalogue | Products, product variants (with stock), brands and categories |
