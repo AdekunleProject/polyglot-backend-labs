@@ -5,7 +5,7 @@
 A REST API for an online store, built with **NestJS, TypeScript and MongoDB**. It covers sign-up and login, products and variants, carts, orders, payments and admin analytics. The project also ships with the DevOps work around it: a hardened Docker image, a GitHub Actions pipeline, Terraform for AWS EKS and a Helm chart.
 
 - API docs (Swagger): `http://localhost:5000/docs` when running
-- Health check: `GET /health`
+- Health checks: `GET /health` (liveness) and `GET /ready` (readiness, checks MongoDB)
 
 ## Contents
 
@@ -76,7 +76,7 @@ docker compose ps
 curl http://localhost:5000/health
 ```
 
-The health check returns `{"status":"ok"}` once the app is ready (allow about 20 seconds). Then open **http://localhost:5000/docs**.
+The health check returns `{"status":"ok"}` once the app is ready (allow about 20 seconds). `GET /ready` also checks the database connection. Then open **http://localhost:5000/docs**.
 
 Load a small demo catalogue (3 categories, 3 brands, 4 products with variants). It is safe to run twice:
 
@@ -121,6 +121,8 @@ You need a MongoDB **replica set** (transactions are used for payments; Atlas wo
 
 All settings are environment variables. `.env.example` lists them; real values go in a local `.env` (never committed) or, on Kubernetes, in a Secret.
 
+The app checks its settings when it starts. It refuses to boot if `MONGODB_URI`, `JWT_SECRET` or `JWT_REFRESH_SECRET` is missing, and when `NODE_ENV=production` (the Docker image's default) both secrets must be at least 32 characters and different from each other. The error message lists every problem at once. If an old `.env` has short secrets, replace them with long random strings (for example `openssl rand -hex 32`).
+
 | Variable | Purpose |
 | --- | --- |
 | `NODE_ENV`, `PORT` | Mode and listening port (5000) |
@@ -152,7 +154,8 @@ Full, interactive documentation is in Swagger at `/docs`. Main route groups:
 | `/payments` | Initialise, verify, refund, webhook, bank-transfer approval |
 | `/notifications` | List, unread count, mark as read |
 | `/analytics` | Admin and customer reports |
-| `/health` | Health check: reports that the process is up (it does not check MongoDB) |
+| `/health` | Liveness: the process is up (does not depend on MongoDB, so a database outage never restarts pods) |
+| `/ready` | Readiness: pings MongoDB and returns 503 when it is unreachable |
 
 There are two roles. Browsing products, variants, brands and categories is public. Customers manage their own cart, orders and payments. Admins manage the catalogue, see all orders and payments, issue refunds, approve bank transfers and read the admin analytics.
 
@@ -182,7 +185,7 @@ The workflow is `.github/workflows/ecommerce-backend.yaml` at the repository roo
 2. Build a test image and run lint (report only) and unit tests
 3. Build the production image
 4. Scan the image with **Trivy**; the build fails on any fixable CRITICAL vulnerability
-5. Smoke test: start the image with MongoDB and require `/health` to answer
+5. Smoke test: start the image with MongoDB and require `/health` and `/ready` to answer
 6. On `master` only, push the image to `ghcr.io/adekunleproject/ecommerce-backend`, tagged with the commit SHA
 
 Every deployed image maps to exactly one commit, which makes rollbacks and audits straightforward.
@@ -215,7 +218,7 @@ helm install ecommerce helm/ecommerce --set image.tag=<commit-sha> --wait --time
 kubectl port-forward svc/ecommerce-api 5000:5000
 ```
 
-The chart runs two API replicas and a standalone MongoDB deployment (fine for a demo; payments need a replica set or Atlas), with a ConfigMap for settings, a Secret for credentials, and startup, readiness and liveness probes on `/health`. Pods run as non-root with all Linux capabilities dropped.
+The chart runs two API replicas and a standalone MongoDB deployment (fine for a demo; payments need a replica set or Atlas), with a ConfigMap for settings, a Secret for credentials, and probes: startup and liveness on `/health`, readiness on `/ready`. Pods run as non-root with all Linux capabilities dropped.
 
 ### Rolling back a bad release
 
@@ -251,7 +254,6 @@ It can be rebuilt from the same code in about 15 minutes.
 ## Known limitations
 
 - One refresh token per user, and it is not rotated. A stolen refresh token works until it expires or the user logs out. My MarketEdge backend does this better (per-device sessions, rotation and reuse detection), and I would bring that design here.
-- `/health` only checks that the process is running, so Kubernetes cannot tell a pod that has lost its database from a healthy one.
 - Lint is report-only in CI for now.
 - No queue for slow work such as emails, which are sent during the request.
 - The EKS cluster was destroyed after testing, so nothing is running. The chart's MongoDB is a single demo pod, and the app has not been load tested.

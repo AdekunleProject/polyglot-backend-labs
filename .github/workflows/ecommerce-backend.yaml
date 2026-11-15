@@ -67,13 +67,14 @@ jobs:
       - name: Trivy scan (fail on fixable CRITICAL)
         run: trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed "$IMAGE:$GITHUB_SHA"
 
-      - name: Smoke test (image starts and answers /health)
+      - name: Smoke test (image starts and answers /health and /ready)
         run: |
           docker network create ci
           docker run -d --name mongo --network ci mongo:7
           docker run -d --name api --network ci -p 5000:5000 \
             -e MONGODB_URI=mongodb://mongo:27017/ecommerce \
-            -e JWT_SECRET=ci -e JWT_REFRESH_SECRET=ci \
+            -e JWT_SECRET=ci-access-secret-0123456789abcdef0123 \
+            -e JWT_REFRESH_SECRET=ci-refresh-secret-0123456789abcdef01 \
             -e JWT_EXPIRES_IN=15m -e JWT_REFRESH_EXPIRES_IN=7d \
             -e GOOGLE_CLIENT_ID=ci -e GOOGLE_CLIENT_SECRET=ci \
             -e GOOGLE_CALLBACK_URL=http://localhost/cb \
@@ -83,7 +84,7 @@ jobs:
             -e AWS_SECRET_ACCESS_KEY=ci -e AWS_S3_BUCKET=ci \
             "$IMAGE:$GITHUB_SHA"
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:5000/health; then echo; exit 0; fi
+            if curl -fsS http://localhost:5000/health && curl -fsS http://localhost:5000/ready; then echo; exit 0; fi
             sleep 2
           done
           docker logs api

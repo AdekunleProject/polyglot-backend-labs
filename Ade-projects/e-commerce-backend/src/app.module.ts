@@ -16,6 +16,7 @@ import { NotificationsModule } from 'src/notifications/notification.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { validateEnv } from './config/env.validation';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
       cache: true,
       expandVariables: true,
       envFilePath: '.env',
+      validate: validateEnv,
     }),
     ThrottlerModule.forRoot([
       {

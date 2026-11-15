@@ -195,6 +195,15 @@ describe('Checkout (integration)', () => {
     await app?.close();
   });
 
+  describe('probes', () => {
+    it('/health is up, and /ready confirms MongoDB is reachable', async () => {
+      expect((await http().get('/health')).body).toEqual({ status: 'ok' });
+      const ready = await http().get('/ready');
+      expect(ready.status).toBe(200);
+      expect(ready.body).toEqual({ status: 'ready', mongo: true });
+    });
+  });
+
   describe('access control', () => {
     it('rejects an anonymous order and a customer creating catalogue data', async () => {
       expect((await http().post('/orders').send({ shippingAddress: address })).status).toBe(401);
