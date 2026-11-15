@@ -143,14 +143,14 @@ export class OrdersService {
       userId,
       NotificationType.ORDER_PLACED,
       'Order placed',
-      `Your order for $${total.toFixed(2)} has been placed and is now pending.`,
+      `Your order for NGN ${total.toFixed(2)} has been placed and is now pending.`,
       `/orders/${order._id}`,
     );
 
     await this.notificationsService.notifyAdmins(
       NotificationType.NEW_ORDER,
       'New order received',
-      `A new order for $${total.toFixed(2)} was just placed.`,
+      `A new order for NGN ${total.toFixed(2)} was just placed.`,
       `/admin/orders`,
     );
 

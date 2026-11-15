@@ -41,6 +41,20 @@ jobs:
       - name: Unit tests
         run: docker run --rm ecommerce-test pnpm test
 
+      - name: Integration tests (checkout against a real MongoDB replica set)
+        run: |
+          docker run -d --name itmongo -p 27017:27017 mongo:7 --replSet rs0 --bind_ip_all
+          for i in $(seq 1 30); do
+            docker exec itmongo mongosh --quiet --eval "db.hello().ok" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec itmongo mongosh --quiet --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+          for i in $(seq 1 30); do
+            docker exec itmongo mongosh --quiet --eval "db.hello().isWritablePrimary" | grep -q true && break
+            sleep 2
+          done
+          docker run --rm --network host ecommerce-test pnpm test:e2e
+
       - name: Build production image
         run: docker build -t "$IMAGE:$GITHUB_SHA" "$APP_DIR"
 

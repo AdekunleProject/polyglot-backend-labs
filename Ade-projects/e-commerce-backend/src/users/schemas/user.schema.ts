@@ -62,6 +62,7 @@ export class User extends Document {
   @Prop({ type: Date, default: null }) resetTokenExpires!: Date;
   @Prop({ type: String, default: null }) emailVerificationToken!: string;
   @Prop({
+    type: String,
     enum: ProfileImageProvider,
   })
   profileImageProvider?: ProfileImageProvider;

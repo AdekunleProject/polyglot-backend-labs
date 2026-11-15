@@ -13,7 +13,7 @@ import { SignupDto } from '../auth/dto/signup.dto';
 import { LoginDto } from '../auth/dto/login.dto';
 import { ResetPasswordDto } from '../auth/dto/reset-password.dto';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { MailService } from '../helpers/mail/mail-service';
 import { MailToken } from '../users/schemas/mail.schema';
 import { Role } from 'src/common/enums/role.enum';
@@ -35,6 +35,19 @@ export class AuthService {
     private readonly fileUpload: FileUpload,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  // Token lifetimes come from the environment (JWT_EXPIRES_IN and
+  // JWT_REFRESH_EXPIRES_IN). They used to be hard-coded to 15m and 30d, so
+  // changing the settings had no effect.
+  private get accessTokenTtl(): JwtSignOptions['expiresIn'] {
+    return (this.configService.get<string>('JWT_EXPIRES_IN') ??
+      '15m') as JwtSignOptions['expiresIn'];
+  }
+
+  private get refreshTokenTtl(): JwtSignOptions['expiresIn'] {
+    return (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ??
+      '7d') as JwtSignOptions['expiresIn'];
+  }
 
   private async resolveProfileImage(user: User): Promise<string | undefined> {
     if (!user.profileImage) {
@@ -191,7 +204,7 @@ export class AuthService {
       },
       {
         secret: this.configService.getOrThrow<string>('JWT_SECRET'),
-        expiresIn: '15m',
+        expiresIn: this.accessTokenTtl,
       },
     );
     const refreshToken = await this.jwtService.signAsync(
@@ -200,7 +213,7 @@ export class AuthService {
       },
       {
         secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
-        expiresIn: '30d',
+        expiresIn: this.refreshTokenTtl,
       },
     );
     const profileImage = await this.resolveProfileImage(user);
@@ -278,7 +291,7 @@ export class AuthService {
         },
         {
           secret: this.configService.getOrThrow('JWT_SECRET'),
-          expiresIn: '15m',
+          expiresIn: this.accessTokenTtl,
         },
       );
       const refreshToken = await this.jwtService.signAsync(
@@ -287,7 +300,7 @@ export class AuthService {
         },
         {
           secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
-          expiresIn: '30d',
+          expiresIn: this.refreshTokenTtl,
         },
       );
       user.hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
@@ -343,7 +356,7 @@ export class AuthService {
       },
       {
         secret: this.configService.getOrThrow('JWT_SECRET'),
-        expiresIn: '15m',
+        expiresIn: this.accessTokenTtl,
       },
     );
 

@@ -16,7 +16,10 @@ import {
   PaymentStatus,
   PaymentProvider,
 } from './schemas/payment.schema';
-import { Order } from '../orders/schemas/order.schema';
+import {
+  Order,
+  PaymentStatus as OrderPaymentStatus,
+} from '../orders/schemas/order.schema';
 
 import { InitializePaymentDto } from './dto/initialize-payment.dto';
 import { PayStackService } from './paystack.service';
@@ -212,19 +215,36 @@ export class PaymentsService {
           message: 'Payment amount does not match the order.',
         };
       }
-      paymentInSession.status = PaymentStatus.PAID;
-      paymentInSession.gatewayTransactionId = transaction.id?.toString();
-      paymentInSession.paymentMethod = transaction.channel;
-      paymentInSession.paidAt = new Date(transaction.paid_at);
-      paymentInSession.gatewayResponse = transaction;
+      // Claim the PAID state in one conditional update. If a second webhook
+      // for the same payment gets here at the same moment, only one of them
+      // can win, so the order is paid and the customer notified exactly once.
+      const claimed = await this.paymentModel.findOneAndUpdate(
+        { _id: paymentInSession._id, status: { $ne: PaymentStatus.PAID } },
+        {
+          $set: {
+            status: PaymentStatus.PAID,
+            gatewayTransactionId: transaction.id?.toString(),
+            paymentMethod: transaction.channel,
+            paidAt: new Date(transaction.paid_at),
+            gatewayResponse: transaction,
+          },
+        },
+        { returnDocument: 'after', session },
+      );
 
-      await paymentInSession.save({ session });
+      if (!claimed) {
+        await session.abortTransaction();
+        return {
+          success: true,
+          message: 'Payment already verified.',
+        };
+      }
 
       await this.orderService.updateOne(
         { _id: paymentInSession.order },
         {
           $set: {
-            paymentStatus: PaymentStatus.PAID,
+            paymentStatus: OrderPaymentStatus.PAID,
           },
         },
         { session },
@@ -246,6 +266,14 @@ export class PaymentsService {
       };
     } catch (error) {
       await session.abortTransaction();
+      // Lost a write race against another verification of the same payment.
+      const current = await this.paymentModel.findById(payment._id);
+      if (current?.status === PaymentStatus.PAID) {
+        return {
+          success: true,
+          message: 'Payment already verified.',
+        };
+      }
       throw error;
     } finally {
       await session.endSession();
@@ -335,7 +363,7 @@ export class PaymentsService {
         },
         {
           $set: {
-            paymentStatus: PaymentStatus.REFUNDED,
+            paymentStatus: OrderPaymentStatus.REFUNDED,
           },
         },
         {
@@ -487,7 +515,7 @@ export class PaymentsService {
       },
       {
         $set: {
-          paymentStatus: PaymentStatus.PAID,
+          paymentStatus: OrderPaymentStatus.PAID,
           paidAt: payment.paidAt,
         },
       },

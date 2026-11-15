@@ -164,7 +164,15 @@ pnpm test
 
 The suite covers the roles guard (including the unauthenticated case), the global exception filter, the health route, Paystack webhook signature checking and atomic stock handling. Run the command to see the current number of tests. The CI pipeline runs the same tests on every push.
 
-The suite is small for the size of the app. There is no automated test against a real MongoDB with transactions, so the full checkout is checked by hand with Swagger and a Paystack test payment, as described above.
+There is also an integration test for the money path (`test/checkout.e2e-spec.ts`). It starts the real app against a real MongoDB replica set and fakes only Paystack. It checks that stock is reserved, that two buyers cannot both get the last unit (repeated 10 times), that the amount sent to Paystack is in kobo, that a webhook with a bad signature changes nothing, that a good one marks the payment and order paid only after Paystack confirms the amount, and that a replayed webhook is ignored. CI runs it on every push. To run it locally:
+
+```bash
+docker run -d --name it-mongo -p 27017:27017 mongo:7 --replSet rs0 --bind_ip_all
+docker exec it-mongo mongosh --quiet --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+pnpm test:e2e
+```
+
+The test only runs against a database whose name ends in `_it`, and it wipes that database. Stop the container with `docker rm -f it-mongo` when you are done.
 
 ## CI/CD pipeline
 
