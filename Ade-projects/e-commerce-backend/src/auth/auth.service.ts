@@ -21,6 +21,7 @@ import { FileUpload } from 'src/aws/aws.file-upload';
 import { AuthProvider } from 'src/common/enums/auth-provider.enum';
 import { ProfileImageProvider } from '../common/enums/profile-image-provider.enum';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { hashToken, sameHash } from './token-hash';
 import { NotificationsService } from 'src/notifications/notification.service';
 import { NotificationType } from 'src/notifications/schemas/notification.schema';
 
@@ -47,6 +48,65 @@ export class AuthService {
   private get refreshTokenTtl(): JwtSignOptions['expiresIn'] {
     return (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ??
       '7d') as JwtSignOptions['expiresIn'];
+  }
+
+  // A user may be signed in on several devices. Each device has a session with
+  // its own refresh token. The most sessions kept per user; the oldest is dropped.
+  private static readonly MAX_SESSIONS = 5;
+
+  private signRefreshToken(userId: string, sid: string): Promise<string> {
+    return this.jwtService.signAsync(
+      // jti makes every token unique, even when issued in the same second.
+      { sub: userId, sid, type: 'refresh', jti: crypto.randomUUID() },
+      {
+        secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
+        expiresIn: this.refreshTokenTtl,
+      },
+    );
+  }
+
+  private async startSession(userId: string): Promise<string> {
+    const sid = crypto.randomUUID();
+    const refreshToken = await this.signRefreshToken(userId, sid);
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        $push: {
+          sessions: {
+            $each: [
+              {
+                sid,
+                tokenHash: hashToken(refreshToken),
+                createdAt: new Date(),
+                lastUsedAt: new Date(),
+              },
+            ],
+            $slice: -AuthService.MAX_SESSIONS,
+          },
+        },
+      },
+    );
+    return refreshToken;
+  }
+
+  private async readRefreshToken(
+    token: string,
+  ): Promise<{ sub: string; sid: string }> {
+    try {
+      const payload = await this.jwtService.verifyAsync<{
+        sub?: string;
+        sid?: string;
+        type?: string;
+      }>(token, {
+        secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
+      });
+      if (!payload.sub || !payload.sid || payload.type !== 'refresh') {
+        throw new Error('not a refresh token');
+      }
+      return { sub: payload.sub, sid: payload.sid };
+    } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
   }
 
   private async resolveProfileImage(user: User): Promise<string | undefined> {
@@ -207,15 +267,7 @@ export class AuthService {
         expiresIn: this.accessTokenTtl,
       },
     );
-    const refreshToken = await this.jwtService.signAsync(
-      {
-        sub: user._id.toString(),
-      },
-      {
-        secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
-        expiresIn: this.refreshTokenTtl,
-      },
-    );
+    const refreshToken = await this.startSession(user._id.toString());
     const profileImage = await this.resolveProfileImage(user);
     return {
       refreshToken,
@@ -294,17 +346,7 @@ export class AuthService {
           expiresIn: this.accessTokenTtl,
         },
       );
-      const refreshToken = await this.jwtService.signAsync(
-        {
-          sub: user._id.toString(),
-        },
-        {
-          secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
-          expiresIn: this.refreshTokenTtl,
-        },
-      );
-      user.hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
-      await user.save();
+      const refreshToken = await this.startSession(user._id.toString());
 
       await this.notificationsService.notifyUser(
         user._id,
@@ -334,23 +376,52 @@ export class AuthService {
   }
 
   async refreshToken(dto: RefreshTokenDto) {
-    const payload = await this.jwtService.verifyAsync(dto.refreshToken, {
-      secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
-    });
-    const user = await this.userModel.findById(payload.sub);
-    if (!user || !user.hashedRefreshToken) {
-      throw new UnauthorizedException();
+    const { sub, sid } = await this.readRefreshToken(dto.refreshToken);
+    const presented = hashToken(dto.refreshToken);
+
+    const user = await this.userModel
+      .findOne({ _id: sub, 'sessions.sid': sid })
+      .select('+sessions');
+    const session = user?.sessions.find((s) => s.sid === sid);
+    if (!user || !session) {
+      throw new UnauthorizedException('Session not found');
     }
-    const valid = await bcrypt.compare(
-      dto.refreshToken,
-      user.hashedRefreshToken,
+
+    // A valid, signed token that is not the current one for this session was
+    // already used. Either the real user or a thief has an old copy, so end
+    // the session and make everybody sign in again.
+    if (!sameHash(session.tokenHash, presented)) {
+      await this.endSession(user._id.toString(), sid);
+      throw new UnauthorizedException(
+        'Refresh token was already used. Please sign in again.',
+      );
+    }
+
+    // Swap in the new token only if the stored hash is still the one we just
+    // checked. If two requests present the same token at once, only one wins.
+    const refreshToken = await this.signRefreshToken(user._id.toString(), sid);
+    const swapped = await this.userModel.updateOne(
+      {
+        _id: user._id,
+        sessions: { $elemMatch: { sid, tokenHash: presented } },
+      },
+      {
+        $set: {
+          'sessions.$.tokenHash': hashToken(refreshToken),
+          'sessions.$.lastUsedAt': new Date(),
+        },
+      },
     );
-    if (!valid) {
-      throw new UnauthorizedException();
+    if (swapped.modifiedCount !== 1) {
+      await this.endSession(user._id.toString(), sid);
+      throw new UnauthorizedException(
+        'Refresh token was already used. Please sign in again.',
+      );
     }
+
     const accessToken = await this.jwtService.signAsync(
       {
-        sub: user._id,
+        sub: user._id.toString(),
         email: user.email,
         role: user.role,
       },
@@ -360,9 +431,14 @@ export class AuthService {
       },
     );
 
-    return {
-      accessToken,
-    };
+    return { accessToken, refreshToken };
+  }
+
+  private async endSession(userId: string, sid: string) {
+    await this.userModel.updateOne(
+      { _id: userId },
+      { $pull: { sessions: { sid } } },
+    );
   }
 
   async forgotPassword(email: string) {
@@ -427,6 +503,8 @@ export class AuthService {
     }
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
+    // A new password signs the account out everywhere.
+    await this.userModel.updateOne({ _id: user._id }, { $set: { sessions: [] } });
     // await this.mailTokenModel.deleteOne({
     //   _id: verification._id,
     // });
@@ -449,10 +527,19 @@ export class AuthService {
     }
   }
 
-  async logout(userId: string) {
-    await this.userModel.findByIdAndUpdate(userId, {
-      hashedRefreshToken: null,
-    });
+  async logout(userId: string, refreshToken?: string) {
+    if (refreshToken) {
+      // This device only. The filter on userId means a token can only ever
+      // end one of the caller's own sessions.
+      const { sid } = await this.readRefreshToken(refreshToken).catch(() => ({
+        sid: undefined,
+      }));
+      if (sid) {
+        await this.endSession(userId, sid);
+      }
+    } else {
+      await this.userModel.updateOne({ _id: userId }, { $set: { sessions: [] } });
+    }
 
     await this.notificationsService.notifyUser(
       userId,

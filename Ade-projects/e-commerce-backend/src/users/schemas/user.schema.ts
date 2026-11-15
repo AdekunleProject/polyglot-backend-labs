@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Schema as MongooseSchema } from 'mongoose';
 import { Factory } from 'nestjs-seeder';
 import { Role } from '../../common/enums/role.enum';
 import { AuthProvider } from 'src/common/enums/auth-provider.enum';
@@ -15,6 +15,23 @@ export function generateUniqueEmail(faker: any): string {
   usedEmails.add(email);
   return email;
 }
+export interface Session {
+  sid: string;
+  tokenHash: string;
+  createdAt: Date;
+  lastUsedAt: Date;
+}
+
+const SessionSchema = new MongooseSchema<Session>(
+  {
+    sid: { type: String, required: true },
+    tokenHash: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    lastUsedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 @Schema({ timestamps: true })
 export class User extends Document {
   @Factory((faker) => faker!.person.firstName())
@@ -80,10 +97,10 @@ export class User extends Document {
   })
   googleId?: string;
 
-  @Prop({
-    default: null,
-  })
-  hashedRefreshToken?: string;
+  // One entry per signed-in device. Holds only a hash of the current refresh
+  // token, never the token itself. Hidden from queries unless asked for.
+  @Prop({ type: [SessionSchema], default: [], select: false })
+  sessions!: Session[];
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

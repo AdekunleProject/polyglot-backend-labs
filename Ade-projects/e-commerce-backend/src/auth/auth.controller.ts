@@ -27,6 +27,7 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { uploadOptions } from 'src/aws/aws.multer-uploads';
 import { GoogleAuthGuard } from '../common/guards/google.auth';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { LogoutDto } from './dto/logout.dto';
 import { Throttle } from '@nestjs/throttler';
 
 @Controller('auth/')
@@ -100,7 +101,7 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.CUSTOMER, Role.ADMIN)
-  logout(@CurrentUser() user: CurrentUserInterface) {
-    return this.authService.logout(user.id);
+  logout(@CurrentUser() user: CurrentUserInterface, @Body() dto: LogoutDto) {
+    return this.authService.logout(user.id, dto?.refreshToken);
   }
 }

@@ -72,6 +72,30 @@ describe('Checkout (integration)', () => {
     return (res.body as { accessToken: string }).accessToken;
   }
 
+  async function registerEmail(): Promise<string> {
+    counter += 1;
+    const email = `session-${counter}-${Date.now()}@e2e.test`;
+    await userModel.create({
+      firstname: 'E2E',
+      lastname: 'session',
+      email,
+      password: await bcrypt.hash(PASSWORD, 4),
+      role: Role.CUSTOMER,
+      isVerified: true,
+      isActive: true,
+    });
+    return email;
+  }
+
+  async function loginAs(email: string) {
+    const res = await http().post('/auth/login').send({ email, password: PASSWORD });
+    expect(res.status).toBe(201);
+    return res.body as { accessToken: string; refreshToken: string };
+  }
+
+  const refresh = (refreshToken: string) =>
+    http().post('/auth/refresh').send({ refreshToken });
+
   async function createVariant(stock: number, price = 1000): Promise<string> {
     counter += 1;
     const auth = { Authorization: `Bearer ${adminToken}` };
@@ -235,6 +259,62 @@ describe('Checkout (integration)', () => {
         Buffer.from(refreshToken.split('.')[1], 'base64url').toString(),
       ) as { iat: number; exp: number };
       expect(payload.exp - payload.iat).toBe(7 * 24 * 60 * 60);
+    });
+  });
+
+  describe('refresh tokens', () => {
+    it('rotates on every use and returns a different refresh token', async () => {
+      const first = await loginAs(await registerEmail());
+
+      const res = await refresh(first.refreshToken);
+
+      expect(res.status).toBe(201);
+      const body = res.body as { accessToken: string; refreshToken: string };
+      expect(body.accessToken).toBeTruthy();
+      expect(body.refreshToken).not.toBe(first.refreshToken);
+      expect((await refresh(body.refreshToken)).status).toBe(201);
+    });
+
+    it('treats a replayed old token as theft and ends the whole session', async () => {
+      const first = await loginAs(await registerEmail());
+      const rotated = (await refresh(first.refreshToken)).body as { refreshToken: string };
+
+      const replay = await refresh(first.refreshToken);
+      expect(replay.status).toBe(401);
+
+      // the newest token is dead too, because the session was revoked
+      expect((await refresh(rotated.refreshToken)).status).toBe(401);
+    });
+
+    it('keeps devices independent and signs out one device at a time', async () => {
+      const email = await registerEmail();
+      const phone = await loginAs(email);
+      const laptop = await loginAs(email);
+
+      const out = await http()
+        .post('/auth/logout')
+        .set('Authorization', `Bearer ${phone.accessToken}`)
+        .send({ refreshToken: phone.refreshToken });
+      expect(out.status).toBe(201);
+
+      expect((await refresh(phone.refreshToken)).status).toBe(401);
+      expect((await refresh(laptop.refreshToken)).status).toBe(201);
+    });
+
+    it('signs out every device when no refresh token is sent', async () => {
+      const email = await registerEmail();
+      const phone = await loginAs(email);
+      const laptop = await loginAs(email);
+
+      await http().post('/auth/logout').set('Authorization', `Bearer ${phone.accessToken}`);
+
+      expect((await refresh(phone.refreshToken)).status).toBe(401);
+      expect((await refresh(laptop.refreshToken)).status).toBe(401);
+    });
+
+    it('rejects an access token used as a refresh token', async () => {
+      const login = await loginAs(await registerEmail());
+      expect((await refresh(login.accessToken)).status).toBe(401);
     });
   });
 

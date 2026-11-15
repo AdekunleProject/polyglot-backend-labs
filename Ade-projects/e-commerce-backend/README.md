@@ -26,7 +26,7 @@ A REST API for an online store, built with **NestJS, TypeScript and MongoDB**. I
 
 | Area | What it provides |
 | --- | --- |
-| Auth | Sign-up with email verification, login, refresh tokens, logout, forgot and reset password, Google sign-in |
+| Auth | Sign-up with email verification, login, per-device refresh tokens that rotate on every use, logout (this device or all), forgot and reset password, Google sign-in |
 | Users and roles | Two roles, `customer` and `admin`, enforced by JWT and role guards |
 | Catalogue | Products, product variants (with stock), brands and categories |
 | Cart and orders | Per-user cart, order creation, order history, admin order management |
@@ -250,10 +250,11 @@ It can be rebuilt from the same code in about 15 minutes.
 - Helmet security headers and rate limiting are enabled
 - The container runs as a non-root user and the image is scanned on every build
 - Payment webhooks are verified with an HMAC signature
+- Refresh tokens are per device, stored only as SHA-256 hashes (never bcrypt, which ignores everything after 72 bytes and would accept an old token), and rotated on every use. Replaying an old token is treated as theft and ends that session. Resetting a password signs the account out everywhere. At most 5 devices stay signed in per user
 
 ## Known limitations
 
-- One refresh token per user, and it is not rotated. A stolen refresh token works until it expires or the user logs out. My MarketEdge backend does this better (per-device sessions, rotation and reuse detection), and I would bring that design here.
+- Because refresh tokens rotate, a client must save the new `refreshToken` that `/auth/refresh` returns and must not send two refresh calls for the same token at once, or it gets signed out. Sessions are not listed or revocable one by one from the API yet; logout ends the current device or all devices.
 - Lint is report-only in CI for now.
 - No queue for slow work such as emails, which are sent during the request.
 - The EKS cluster was destroyed after testing, so nothing is running. The chart's MongoDB is a single demo pod, and the app has not been load tested.
