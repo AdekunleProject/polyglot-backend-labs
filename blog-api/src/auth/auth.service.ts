@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   UnauthorizedException,
+  BadRequestException
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,47 +11,441 @@ import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-
+import { FileUpload } from '../aws/aws.file-upload';
+import { AuthProvider } from '../common/enums/auth-provider.enum';
+import { ProfileImageProvider } from '../common/enums/profile-image-provider.enum';
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
     private readonly jwtService: JwtService,
+    private readonly fileUpload: FileUpload,
   ) {}
 
-  async register(dto: RegisterDto) {
-    const existing = await this.usersRepository.findOneBy({ email: dto.email });
-    if (existing) {
-      throw new ConflictException('Email already in use');
+  // async register(dto: RegisterDto) {
+  //   const existing = await this.usersRepository.findOneBy({ email: dto.email });
+  //   if (existing) {
+  //     throw new ConflictException('Email already in use');
+  //   }
+  //   const password = await bcrypt.hash(dto.password, 10);
+  //   const user = await this.usersRepository.save(
+  //     this.usersRepository.create({
+  //       name: dto.name,
+  //       email: dto.email,
+  //       password,
+  //     }),
+  //   );
+  //   return { id: user.id, name: user.name, email: user.email, role: user.role };
+  // }
+
+  // async login(dto: LoginDto) {
+  //   // password is select:false, so we must ask for it explicitly here
+  //   const user = await this.usersRepository.findOne({
+  //     where: { email: dto.email },
+  //     select: { id: true, email: true, password: true, role: true },
+  //   });
+  //   const valid = user && (await bcrypt.compare(dto.password, user.password));
+  //   if (!user || !valid) {
+  //     // same message for both cases, so attackers can't discover which emails exist
+  //     throw new UnauthorizedException('Invalid email or password');
+  //   }
+  //   const accessToken = await this.jwtService.signAsync({
+  //     sub: user.id,
+  //     email: user.email,
+  //     role: user.role,
+  //   });
+  //   return { accessToken };
+  // }
+
+
+  async signup(registerDto: RegisterDto, image?: Express.Multer.File) {
+    try {
+      const existingUser = await this.usersRepository.findOneBy({
+        email: registerDto.email,
+      });
+      if (existingUser) {
+        throw new BadRequestException('email already in use');
+      }
+      let profileImage: string | undefined;
+      if (image) {
+        profileImage = await this.fileUpload.uploadFile(image, 'users');
+      }
+      const hashedPassword = await bcrypt.hash(registerDto.password, 12);
+      const user =  this.usersRepository.save(
+        this.usersRepository.create({
+        name: registerDto.name,
+        email: registerDto.email,
+        password: hashedPassword,
+        profileImage,
+        profileImageProvider: profileImage
+          ? ProfileImageProvider.S3
+          : undefined,
+        provider: AuthProvider.LOCAL,
+      })
+      ) 
+
+      await this.notificationsService.notifyUser(
+        user._id,
+        NotificationType.USER_SIGNUP,
+        'Welcome to Duka',
+        `Welcome, ${savedUser.firstname}! Verify your email to get started.`,
+      );
+
+      const { password, ...userData } = savedUser.toObject();
+      const resolvedProfileImage = await this.resolveProfileImage(savedUser);
+      const expiryDate = new Date();
+      expiryDate.setMinutes(expiryDate.getMinutes() + 15);
+      const code = this.generateVerificationCode();
+      await new this.mailTokenModel({
+        userId: savedUser._id,
+        token: code,
+        expiryDate,
+      }).save();
+      await this.mailService.sendEmail(
+        savedUser.email,
+        'Verify your email',
+        `Your verification code is ${code}. It expires in 15 minutes.`,
+      );
+      return {
+        message: 'Thank you for signing up. Please verify your email.',
+        customer: {
+          ...userData,
+          profileImage: resolvedProfileImage,
+        },
+      };
+    } catch (error) {
+      console.log(error, 'Error occurred during signup');
+      throw error;
     }
-    const password = await bcrypt.hash(dto.password, 10);
-    const user = await this.usersRepository.save(
-      this.usersRepository.create({
-        name: dto.name,
-        email: dto.email,
-        password,
-      }),
-    );
-    return { id: user.id, name: user.name, email: user.email, role: user.role };
   }
 
-  async login(dto: LoginDto) {
-    // password is select:false, so we must ask for it explicitly here
-    const user = await this.usersRepository.findOne({
-      where: { email: dto.email },
-      select: { id: true, email: true, password: true, role: true },
+  async googleLogin(googleUser: {
+    googleId: string;
+    email: string;
+    firstname: string;
+    lastname: string;
+    image?: string;
+  }) {
+    let user = await this.userModel.findOne({
+      email: googleUser.email,
     });
-    const valid = user && (await bcrypt.compare(dto.password, user.password));
-    if (!user || !valid) {
-      // same message for both cases, so attackers can't discover which emails exist
-      throw new UnauthorizedException('Invalid email or password');
+
+    if (!user) {
+      user = new this.userModel({
+        firstname: googleUser.firstname,
+        lastname: googleUser.lastname,
+        email: googleUser.email,
+        googleId: googleUser.googleId,
+        provider: AuthProvider.GOOGLE,
+        // role: Role.CUSTOMER,
+        isVerified: true,
+      });
+
+      if (googleUser.image) {
+        user.profileImage = googleUser.image;
+        user.profileImageProvider = ProfileImageProvider.GOOGLE;
+      }
+
+      await user.save();
+    } else {
+      let updated = false;
+
+      if (!user.googleId) {
+        user.googleId = googleUser.googleId;
+        updated = true;
+      }
+
+      if (!user.googleId) {
+        user.googleId = googleUser.googleId;
+        updated = true;
+      }
+
+      if (!user.profileImage && googleUser.image) {
+        user.profileImage = googleUser.image;
+        user.profileImageProvider = ProfileImageProvider.GOOGLE;
+        updated = true;
+      }
+
+      if (!user.isVerified) {
+        user.isVerified = true;
+        updated = true;
+      }
+
+      if (updated) {
+        await user.save();
+      }
     }
-    const accessToken = await this.jwtService.signAsync({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
+
+    const accessToken = await this.jwtService.signAsync(
+      {
+        sub: user._id.toString(),
+        email: user.email,
+        role: user.role,
+      },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+        expiresIn: this.accessTokenTtl,
+      },
+    );
+    const refreshToken = await this.jwtService.signAsync(
+      {
+        sub: user._id.toString(),
+      },
+      {
+        secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
+        expiresIn: this.refreshTokenTtl,
+      },
+    );
+    const profileImage = await this.resolveProfileImage(user);
+    return {
+      refreshToken,
+      accessToken,
+      user: {
+        id: user._id,
+        firstname: user.firstname,
+        lastname: user.lastname,
+        email: user.email,
+        profileImage,
+        role: user.role,
+      },
+    };
+  }
+
+  async verifyUser(email: string, code: string) {
+    try {
+      const user = await this.userModel.findOne({ email });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      // BUG FIX: the original query had `userId` commented out, so a code
+      // wasn't actually scoped to the user it was issued to. Harmless with
+      // a 64-char hex token (collision was practically impossible) but a
+      // real problem with a 6-char code — restored the userId scoping.
+      const verification = await this.mailTokenModel.findOneAndDelete({
+        userId: user._id,
+        token: code.toUpperCase(),
+        expiryDate: { $gt: new Date() },
+      });
+
+      if (!verification) {
+        throw new BadRequestException('Invalid or expired verification code');
+      }
+      user.isVerified = true;
+      await user.save();
+      console.log('Email verified successfully');
+      return {
+        message: 'Email verified successfully',
+      };
+    } catch (error) {
+      console.log(error, 'Error occurred when verifing email');
+      throw error;
+    }
+  }
+
+  async login(loginDto: LoginDto) {
+    try {
+      const { email, password } = loginDto;
+      const user = await this.userModel.findOne({ email }).select('+password');
+      if (!user) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Wrong password');
+      }
+      if (user.provider === AuthProvider.GOOGLE && !user.password) {
+        throw new UnauthorizedException('Please continue with Google Sign-In.');
+      }
+      if (!user.isVerified) {
+        throw new UnauthorizedException(
+          'Please verify your email before logging in.',
+        );
+      }
+      const accessToken = await this.jwtService.signAsync(
+        {
+          sub: user._id.toString(),
+          email: user.email,
+          role: user.role,
+        },
+        {
+          secret: this.configService.getOrThrow('JWT_SECRET'),
+          expiresIn: this.accessTokenTtl,
+        },
+      );
+      const refreshToken = await this.jwtService.signAsync(
+        {
+          sub: user._id.toString(),
+        },
+        {
+          secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
+          expiresIn: this.refreshTokenTtl,
+        },
+      );
+      user.hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+      await user.save();
+
+      await this.notificationsService.notifyUser(
+        user._id,
+        NotificationType.USER_LOGIN,
+        'New sign-in',
+        `You signed in to your account on ${new Date().toLocaleString()}.`,
+      );
+
+      const profileImage = await this.resolveProfileImage(user);
+      console.log('User logged in successfully');
+      return {
+        accessToken,
+        refreshToken,
+        user: {
+          id: user._id,
+          firstname: user.firstname,
+          lastname: user.lastname,
+          email: user.email,
+          profileImage,
+          role: user.role,
+        },
+      };
+    } catch (error) {
+      console.log(error, 'Error occurred during login');
+      throw error;
+    }
+  }
+
+  async refreshToken(dto: RefreshTokenDto) {
+    const payload = await this.jwtService.verifyAsync(dto.refreshToken, {
+      secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
     });
-    return { accessToken };
+    const user = await this.userModel.findById(payload.sub);
+    if (!user || !user.hashedRefreshToken) {
+      throw new UnauthorizedException();
+    }
+    const valid = await bcrypt.compare(
+      dto.refreshToken,
+      user.hashedRefreshToken,
+    );
+    if (!valid) {
+      throw new UnauthorizedException();
+    }
+    const accessToken = await this.jwtService.signAsync(
+      {
+        sub: user._id,
+        email: user.email,
+        role: user.role,
+      },
+      {
+        secret: this.configService.getOrThrow('JWT_SECRET'),
+        expiresIn: this.accessTokenTtl,
+      },
+    );
+
+    return {
+      accessToken,
+    };
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      // Same answer as for a real account, so this endpoint cannot be used
+      // to find out which emails are registered.
+      return {
+        message: 'If that email is registered, a reset code has been sent.',
+      };
+    }
+    // Standardized to 15 minutes — was 2m30s, unusually short for a code
+    // someone has to read from their inbox and type in by hand.
+    const expiryDate = new Date();
+    expiryDate.setMinutes(expiryDate.getMinutes() + 15);
+    const code = this.generateVerificationCode();
+    await this.mailTokenModel.deleteMany({
+      userId: user._id,
+    });
+
+    await new this.mailTokenModel({
+      userId: user._id,
+      token: code,
+      expiryDate,
+    }).save();
+    await this.mailService.sendEmail(
+      user.email,
+      'Reset your password',
+      `Your password reset code is ${code}. It expires in 15 minutes.`,
+    );
+    return {
+      message: 'If that email is registered, a reset code has been sent.',
+    };
+  }
+
+  async resetPassword(
+    email: string,
+    code: string,
+    resetPasswordDto: ResetPasswordDto,
+  ) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new NotFoundException("users doesn't exist");
+    }
+
+    // BUG FIX: this queried `{ Token: token, ... }` — capital T, but the
+    // schema field is `token` (lowercase). That mismatch meant this query
+    // could never match a real document, so reset-password threw "invalid
+    // token" on every single attempt, no matter how correct the code was.
+    // Also now scoped to this user's own token, same fix as verifyUser().
+    const verification = await this.mailTokenModel.findOneAndDelete({
+      userId: user._id,
+      token: code.toUpperCase(),
+      expiryDate: { $gte: new Date() },
+    });
+    if (!verification) {
+      throw new NotFoundException('Invalid or expired code');
+    }
+    const { newPassword, confirmPassword } = resetPasswordDto;
+    if (newPassword !== confirmPassword) {
+      throw new NotFoundException("Password doesn't match");
+    }
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    // await this.mailTokenModel.deleteOne({
+    //   _id: verification._id,
+    // });
+    console.log('password reset successfully');
+    return {
+      message: 'Password reset successfully',
+    };
+  }
+
+  async validateResetToken(token: string) {
+    const resetToken = await this.mailTokenModel.findOne({
+      token,
+      expiryDate: {
+        $gt: new Date(),
+      },
+    });
+
+    if (!resetToken) {
+      throw new BadRequestException('Token is invalid or expired');
+    }
+  }
+
+  async logout(userId: string) {
+    await this.userModel.findByIdAndUpdate(userId, {
+      hashedRefreshToken: null,
+    });
+
+    await this.notificationsService.notifyUser(
+      userId,
+      NotificationType.USER_LOGOUT,
+      'Signed out',
+      `You signed out on ${new Date().toLocaleString()}.`,
+    );
+
+    return {
+      message: 'Logged out successfully',
+    };
   }
 }
+
+
