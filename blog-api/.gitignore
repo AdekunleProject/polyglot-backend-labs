@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 .env.test
+docker-compose.override.yml
+coverage

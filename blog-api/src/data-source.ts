@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { join } from 'path';
 import { DataSource } from 'typeorm';
 import { Comment } from './comments/entities/comment.entity';
 import { Post } from './posts/entities/post.entity';
@@ -12,6 +13,7 @@ export default new DataSource({
   username: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  ssl: process.env.DB_SSL === 'true',
   entities: [User, Post, Tag, Comment],
-  migrations: ['src/migrations/*.ts'],
+  migrations: [join(__dirname, 'migrations', '*{.ts,.js}')],
 });
