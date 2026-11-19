@@ -13,6 +13,7 @@ export class RolesGuard implements CanActivate {
     ]);
     if (!roles) return true;
     const { user } = context.switchToHttp().getRequest();
-    return roles.includes(user?.role);
+    // No authenticated user means deny, not crash.
+    return !!user && roles.includes(user.role);
   }
 }

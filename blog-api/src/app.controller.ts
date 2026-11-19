@@ -3,12 +3,15 @@ import {
   Get,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AppService } from './app.service';
 
 const READY_CHECK_TIMEOUT_MS = 2000;
 
+// Probes come from the cluster every few seconds and must never be limited.
+@SkipThrottle()
 @Controller()
 export class AppController {
   constructor(

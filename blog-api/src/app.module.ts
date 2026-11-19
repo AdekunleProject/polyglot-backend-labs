@@ -1,10 +1,13 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { PostsModule } from './posts/posts.module';
 import { validateEnv } from './config/env.validation';
 import { CommentsModule } from './comments/comments.module';
@@ -12,6 +15,14 @@ import { CommentsModule } from './comments/comments.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // Every route: THROTTLE_LIMIT requests per minute per client address.
+    // The auth routes set tighter limits of their own.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        { ttl: 60_000, limit: Number(config.get('THROTTLE_LIMIT') ?? 60) },
+      ],
+    }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -32,10 +43,11 @@ import { CommentsModule } from './comments/comments.module';
       }),
     }),
     AuthModule,
+    UsersModule,
     PostsModule,
     CommentsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

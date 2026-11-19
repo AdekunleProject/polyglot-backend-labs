@@ -1,3 +1,4 @@
+import { Role } from '../common/enums/role.enum';
 import {
   ForbiddenException,
   Injectable,
@@ -60,7 +61,7 @@ export class CommentsService {
     if (!comment) throw new NotFoundException(`Comment ${commentId} not found`);
 
     const allowed =
-      user.role === 'admin' ||
+      user.role === Role.ADMIN ||
       comment.author.id === user.id ||
       comment.post.author.id === user.id;
     if (!allowed)

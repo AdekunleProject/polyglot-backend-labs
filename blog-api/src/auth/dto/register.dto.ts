@@ -1,10 +1,13 @@
 import {
+  IsDateString,
   IsEmail,
+  IsIn,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MaxLength,
-  MinLength,
 } from 'class-validator';
+import { StrongPassword } from '../strong-password.decorator';
 
 export class RegisterDto {
   @IsString()
@@ -16,8 +19,24 @@ export class RegisterDto {
   @MaxLength(150)
   email: string;
 
-  @IsString()
-  @MinLength(8)
-  @MaxLength(72) // bcrypt ignores anything beyond 72 bytes
+  @StrongPassword()
   password: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  phoneNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateOfBirth?: string;
+
+  @IsOptional()
+  @IsIn(['male', 'female', 'other'])
+  gender?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  address?: string;
 }

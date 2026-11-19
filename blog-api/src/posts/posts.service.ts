@@ -1,3 +1,4 @@
+import { Role } from '../common/enums/role.enum';
 import {
   ForbiddenException,
   Injectable,
@@ -111,7 +112,7 @@ export class PostsService {
       relations: { author: true, tags: true },
     });
     if (!post) throw new NotFoundException(`Post ${id} not found`);
-    if (user.role !== 'admin' && post.author.id !== user.id) {
+    if (user.role !== Role.ADMIN && post.author.id !== user.id) {
       throw new ForbiddenException('You can only change your own posts');
     }
     return post;

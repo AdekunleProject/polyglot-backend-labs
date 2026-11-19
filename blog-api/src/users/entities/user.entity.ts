@@ -1,23 +1,76 @@
-import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
+import { AuthProvider } from '../../common/enums/auth-provider.enum';
+import { ProfileImageProvider } from '../../common/enums/profile-image-provider.enum';
+import { Role } from '../../common/enums/role.enum';
 import { Comment } from '../../comments/entities/comment.entity';
 import { Post } from '../../posts/entities/post.entity';
 
 @Entity('users')
+@Unique('UQ_users_googleId', ['googleId'])
 export class User {
   @PrimaryGeneratedColumn()
   id: number;
 
+  // Display name: shown as the author of posts and comments.
   @Column({ length: 100 })
   name: string;
 
   @Column({ length: 150, unique: true })
   email: string;
 
-  @Column({ select: false })
-  password: string;
+  // Null for accounts that only ever signed in with Google.
+  @Column({ type: 'varchar', nullable: true, select: false })
+  password: string | null;
 
-  @Column({ type: 'varchar', length: 20, default: 'user' })
-  role: 'user' | 'admin';
+  @Column({ type: 'varchar', length: 20, default: Role.USER })
+  role: Role;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  phoneNumber: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  dateOfBirth: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  gender: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  address: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  jobTitle: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  bio: string | null;
+
+  // An S3 object key, or a Google picture URL (see profileImageProvider).
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  profileImage: string | null;
+
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  profileImageProvider: ProfileImageProvider | null;
+
+  @Column({ type: 'varchar', length: 10, default: AuthProvider.LOCAL })
+  provider: AuthProvider;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  googleId: string | null;
+
+  @Column({ default: false })
+  isVerified: boolean;
+
+  @Column({ default: true })
+  isActive: boolean;
+
+  @CreateDateColumn()
+  createdAt: Date;
 
   @OneToMany(() => Post, (post) => post.author)
   posts: Post[];

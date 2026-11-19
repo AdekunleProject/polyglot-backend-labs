@@ -5,6 +5,12 @@
 //   docker compose exec api node scripts/demo-seed.mjs
 //
 // Optional: API_URL (default http://127.0.0.1:PORT).
+//
+// Sign-up needs an emailed code, which a demo cannot read, so the script marks
+// its own demo accounts as verified directly in the database (it uses the same
+// DB_* settings as the app).
+
+import pg from 'pg';
 
 const base = process.env.API_URL ?? `http://127.0.0.1:${process.env.PORT ?? 3000}`;
 const PASSWORD = 'Demo-Passw0rd!';
@@ -24,9 +30,20 @@ async function call(method, path, body, token) {
   return { ok: res.ok, status: res.status, data };
 }
 
+const db = new pg.Client({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  ssl: process.env.DB_SSL === 'true',
+});
+await db.connect();
+
 async function user(name, email) {
   const created = await call('POST', '/auth/register', { name, email, password: PASSWORD });
   console.log(created.ok ? `created user ${email}` : `user ${email} exists`);
+  await db.query('UPDATE users SET "isVerified" = true WHERE email = $1', [email]);
   const login = await call('POST', '/auth/login', { email, password: PASSWORD });
   if (!login.ok) throw new Error(`login failed for ${email}: ${login.status}`);
   return login.data.accessToken;
@@ -66,5 +83,6 @@ if (firstPublished) {
     console.log('created a comment');
   }
 }
+await db.end();
 console.log('\nDone. Browse GET /posts and GET /tags.');
 console.log(`Demo logins: ada@demo.test and tunde@demo.test, password ${PASSWORD}`);
