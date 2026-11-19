@@ -15,7 +15,10 @@ const config: Config = {
   rootDir: '.',
   testRegex: '.*\\.spec\\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    // ts-jest forces the older module resolution, which TypeScript refuses to
+    // combine with resolvePackageJsonExports from tsconfig.json. Jest therefore
+    // uses a tsconfig that switches that one option off.
+    '^.+\\.(t|j)s$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.jest.json' }],
   },
   moduleNameMapper: pathsToModuleNameMapper(paths, { prefix: '<rootDir>/' }),
   collectCoverageFrom: [
