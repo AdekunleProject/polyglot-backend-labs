@@ -2,6 +2,8 @@
 
 A blogging backend built with NestJS, TypeORM and PostgreSQL. Accounts use the same authentication system as the e-commerce API in this repo: email verification with a code, per-device refresh tokens, password reset by email, Google sign-in, roles, and profile pictures in S3. On top of that: posts with drafts and tags, and comments with ownership rules.
 
+Requires Node 24 or newer to run the tests outside Docker (Nest 12 ships as ES modules). The Docker image already uses Node 24.
+
 ## Quick start (Docker, any computer)
 
 ```bash

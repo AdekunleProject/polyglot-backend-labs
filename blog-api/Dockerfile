@@ -1,4 +1,7 @@
-FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS build
+# Node 24: the Nest 12 packages are ES modules, which Jest can only load on
+# Node 24.9 or newer. Pin by digest once you have pulled it:
+#   docker pull node:24-alpine && docker inspect --format="{{index .RepoDigests 0}}" node:24-alpine
+FROM node:24-alpine AS build
 WORKDIR /app
 RUN apk add --no-cache python3 make g++ \
  && corepack enable \
@@ -11,7 +14,7 @@ RUN pnpm run build
 FROM build AS prune
 RUN pnpm prune --prod
 
-FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS runtime
+FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 ENV PORT=3000
 WORKDIR /app
