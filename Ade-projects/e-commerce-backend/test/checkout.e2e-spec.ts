@@ -202,7 +202,11 @@ describe('Checkout (integration)', () => {
     if (!dbName.endsWith('_it')) {
       throw new Error(`Refusing to wipe "${dbName}". Test database names must end in _it.`);
     }
-    await connection.dropDatabase();
+    // Empties every collection rather than dropping the database, so it also
+    // works for a database user that may read and write but not drop (Atlas).
+    await Promise.all(
+      Object.values(connection.models).map((m) => m.deleteMany({})),
+    );
     await Promise.all(Object.values(connection.models).map((m) => m.init()));
 
     adminToken = await createUser(Role.ADMIN);
