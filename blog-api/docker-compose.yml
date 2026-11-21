@@ -14,6 +14,15 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build: .
     restart: unless-stopped
@@ -26,8 +35,12 @@ services:
       DB_HOST: db
       DB_PORT: "5432"
       RUN_MIGRATIONS: "true"
+      # Rate limit counters are shared through Redis.
+      REDIS_URL: redis://redis:6379
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:

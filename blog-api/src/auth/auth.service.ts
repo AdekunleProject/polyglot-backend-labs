@@ -30,6 +30,8 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { MailToken, MailTokenPurpose } from './entities/mail-token.entity';
 import { Session } from './entities/session.entity';
+import { TwoFactorLoginDto } from './two-factor/dto/two-factor.dto';
+import { TwoFactorService } from './two-factor/two-factor.service';
 import { GoogleProfile } from './google.strategy';
 import { hashToken } from './token-hash';
 import { generateVerificationCode, hashCode } from './verification-code';
@@ -53,6 +55,7 @@ export class AuthService {
     private readonly mailService: MailService,
     private readonly fileUpload: FileUpload,
     private readonly usersService: UsersService,
+    private readonly twoFactor: TwoFactorService,
   ) {}
 
   // Token lifetimes come from the environment.
@@ -259,6 +262,24 @@ export class AuthService {
     if (!user.isActive) {
       throw new ForbiddenException('This account has been deactivated');
     }
+    if (user.twoFactorEnabled) {
+      // Password was right, but no tokens until the second factor is too.
+      return {
+        twoFactorRequired: true as const,
+        challengeToken: await this.twoFactor.createChallenge(user),
+        message:
+          'Enter the code from your authenticator app at POST /auth/2fa/login.',
+      };
+    }
+    return this.issueTokens(user);
+  }
+
+  async loginWithTwoFactor(dto: TwoFactorLoginDto) {
+    const user = await this.twoFactor.verifyLogin(
+      dto.email,
+      dto.challengeToken,
+      dto.code,
+    );
     return this.issueTokens(user);
   }
 

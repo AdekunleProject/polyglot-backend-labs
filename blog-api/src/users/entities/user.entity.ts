@@ -69,6 +69,18 @@ export class User {
   @Column({ default: true })
   isActive: boolean;
 
+  // Authenticator secret, encrypted (see two-factor/secret-box.ts). Never
+  // selected unless asked for.
+  @Column({ type: 'text', nullable: true, select: false })
+  twoFactorSecret: string | null;
+
+  @Column({ default: false })
+  twoFactorEnabled: boolean;
+
+  // Time step of the last accepted code, so a code cannot be used twice.
+  @Column({ type: 'integer', nullable: true })
+  twoFactorLastStep: number | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

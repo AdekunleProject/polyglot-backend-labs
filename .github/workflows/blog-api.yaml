@@ -49,11 +49,16 @@ jobs:
         run: |
           docker run -d --name itpg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=blog_it \
             -p 5432:5432 postgres:16-alpine
+          docker run -d --name itredis -p 6379:6379 redis:7-alpine
           for i in $(seq 1 30); do
             docker exec itpg pg_isready -U postgres -d blog_it && break
             sleep 2
           done
-          docker run --rm --network host blog-test pnpm test:e2e
+          for i in $(seq 1 30); do
+            docker exec itredis redis-cli ping && break
+            sleep 1
+          done
+          docker run --rm --network host -e REDIS_TEST_URL=redis://localhost:6379 blog-test pnpm test:e2e
 
       - name: Build production image
         run: docker build -t "$IMAGE:$GITHUB_SHA" "$APP_DIR"
@@ -73,13 +78,14 @@ jobs:
           docker run -d --name pg --network ci \
             -e POSTGRES_USER=blog -e POSTGRES_PASSWORD=ci-password -e POSTGRES_DB=blog \
             postgres:16-alpine
+          docker run -d --name redis --network ci redis:7-alpine
           for i in $(seq 1 30); do
             docker exec pg pg_isready -U blog -d blog && break
             sleep 2
           done
           docker run -d --name api --network ci -p 3000:3000 \
             -e DB_HOST=pg -e DB_PORT=5432 -e DB_USER=blog -e DB_PASSWORD=ci-password -e DB_NAME=blog \
-            -e RUN_MIGRATIONS=true \
+            -e RUN_MIGRATIONS=true -e REDIS_URL=redis://redis:6379 \
             -e JWT_SECRET=ci-access-secret-0123456789abcdef0123 \
             -e JWT_REFRESH_SECRET=ci-refresh-secret-9876543210fedcba98 \
             "$IMAGE:$GITHUB_SHA"

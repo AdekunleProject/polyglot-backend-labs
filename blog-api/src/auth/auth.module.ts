@@ -13,14 +13,17 @@ import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { MailToken } from './entities/mail-token.entity';
+import { RecoveryCode } from './entities/recovery-code.entity';
 import { Session } from './entities/session.entity';
 import { GoogleAuthGuard } from './google-auth.guard';
 import { GoogleStrategy } from './google.strategy';
 import { JwtStrategy } from './jwt.strategy';
+import { TwoFactorController } from './two-factor/two-factor.controller';
+import { TwoFactorService } from './two-factor/two-factor.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Post, Tag, Comment, Session, MailToken]),
+    TypeOrmModule.forFeature([User, Post, Tag, Comment, Session, MailToken, RecoveryCode]),
     PassportModule,
     UsersModule,
     MailModule,
@@ -37,9 +40,10 @@ import { JwtStrategy } from './jwt.strategy';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, TwoFactorController],
   providers: [
     AuthService,
+    TwoFactorService,
     JwtStrategy,
     GoogleAuthGuard,
     // Google sign-in is optional: the strategy exists only when its settings do.

@@ -4,14 +4,17 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 import { FileUpload } from '../aws/aws.file-upload';
 import { BCRYPT_SALT_ROUNDS } from '../auth/auth.constant';
 import { Session } from '../auth/entities/session.entity';
+import { MailService } from '../mail/mail.service';
 import { ProfileImageProvider } from '../common/enums/profile-image-provider.enum';
 import { Role } from '../common/enums/role.enum';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -26,6 +29,8 @@ export class UsersService {
     @InjectRepository(Session)
     private readonly sessionsRepository: Repository<Session>,
     private readonly fileUpload: FileUpload,
+    private readonly mailService: MailService,
+    private readonly config: ConfigService,
   ) {}
 
   /** A stored image key becomes a 30 minute link. Google pictures are URLs already. */
@@ -56,6 +61,7 @@ export class UsersService {
       bio: user.bio,
       profileImage: await this.resolveProfileImage(user),
       isVerified: user.isVerified,
+      twoFactorEnabled: user.twoFactorEnabled,
       isActive: user.isActive,
       provider: user.provider,
       createdAt: user.createdAt,
@@ -87,9 +93,14 @@ export class UsersService {
   }
 
   /**
-   * Admin creates an account. A one-time password is generated and shown once
-   * in the response, as in the e-commerce API, and the person should change
-   * it. The account is already verified because an admin vouched for it.
+   * Admin creates an account. A one-time password is generated and emailed to
+   * the new user, who should change it at once. The account is already
+   * verified because an admin vouched for it.
+   *
+   * The password is not in the response, so the admin never sees it. If mail
+   * is not set up: in production the user is not created (there would be no
+   * safe way to hand over the password); elsewhere it is returned, so a
+   * development setup without a mail server still works.
    */
   async createByAdmin(dto: CreateUserDto) {
     if (await this.usersRepository.findOneBy({ email: dto.email })) {
@@ -105,8 +116,35 @@ export class UsersService {
         isVerified: true,
       }),
     );
+
+    const emailed = await this.mailService.sendEmail(
+      user.email,
+      'Your account has been created',
+      [
+        `Hello ${user.name},`,
+        '',
+        'An account was created for you.',
+        `Email: ${user.email}`,
+        `Temporary password: ${defaultPassword}`,
+        '',
+        'Sign in and change this password straight away.',
+      ].join('\n'),
+    );
+    if (emailed) {
+      return {
+        message: 'User created. The temporary password was emailed to them.',
+        user: await this.toPublic(user),
+      };
+    }
+    if (this.config.get('NODE_ENV') === 'production') {
+      await this.usersRepository.delete(user.id);
+      throw new ServiceUnavailableException(
+        'The email could not be sent, so the user was not created. Check the mail settings and try again.',
+      );
+    }
     return {
-      message: 'User created successfully',
+      message:
+        'User created. Email is not available here, so the temporary password is shown once (never in production).',
       defaultPassword,
       user: await this.toPublic(user),
     };

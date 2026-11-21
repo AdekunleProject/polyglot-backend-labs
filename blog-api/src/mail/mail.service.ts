@@ -27,21 +27,27 @@ export class MailService {
     });
   }
 
-  /** Never throws: a mail outage must not break sign-up or password reset. */
-  async sendEmail(to: string, subject: string, text: string): Promise<void> {
+  /**
+   * Never throws: a mail outage must not break sign-up or password reset.
+   * Returns whether the message was handed to the mail server, for the few
+   * callers that must know (an admin-created account's password).
+   */
+  async sendEmail(to: string, subject: string, text: string): Promise<boolean> {
     if (!this.transporter) {
       // Local runs without a mail server: print the message so a developer
       // can read the code. Never in production, where it would leak codes.
       if (!this.production) {
         this.logger.log(`[mail disabled] to=${to} subject="${subject}" ${text}`);
       }
-      return;
+      return false;
     }
     try {
       await this.transporter.sendMail({ from: this.from, to, subject, text });
       this.logger.log(`Email sent to ${to}`);
+      return true;
     } catch (error) {
       this.logger.error(`Could not send email to ${to}`, error as Error);
+      return false;
     }
   }
 }

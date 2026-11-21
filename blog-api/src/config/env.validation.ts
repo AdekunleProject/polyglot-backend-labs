@@ -49,6 +49,12 @@ export function validateEnv(
   if (google.some((key) => get(key)) && !google.every((key) => get(key))) {
     problems.push(`${google.join(', ')} must all be set to enable Google sign-in`);
   }
+  if (get('REDIS_URL') && !/^rediss?:\/\//.test(get('REDIS_URL'))) {
+    problems.push('REDIS_URL must start with redis:// or rediss://');
+  }
+  if (get('TWO_FACTOR_KEY') && get('TWO_FACTOR_KEY').length < 16) {
+    problems.push('TWO_FACTOR_KEY must be at least 16 characters');
+  }
   if (!!get('ADMIN_EMAIL') !== !!get('ADMIN_PASSWORD')) {
     problems.push('ADMIN_EMAIL and ADMIN_PASSWORD must be set together');
   }

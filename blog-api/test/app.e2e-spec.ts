@@ -17,6 +17,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { FileUpload } from '../src/aws/aws.file-upload';
+import { base32Decode, hotp, timeStep } from '../src/auth/two-factor/totp';
 import { MailService } from '../src/mail/mail.service';
 import { AdminBootstrapService } from '../src/users/admin-bootstrap.service';
 
@@ -25,8 +26,18 @@ const NEW_PASSWORD = 'N3w-Passw0rd-e2e!';
 
 class FakeMail {
   sent: { to: string; subject: string; text: string }[] = [];
+  // Set to true to behave like a mail server that is down.
+  failing = false;
   async sendEmail(to: string, subject: string, text: string) {
+    if (this.failing) return false;
     this.sent.push({ to, subject, text });
+    return true;
+  }
+  lastPassword(to: string): string {
+    const message = [...this.sent].reverse().find((m) => m.to === to);
+    const match = /Temporary password: (\S+)/.exec(message?.text ?? '');
+    if (!match) throw new Error(`No password was mailed to ${to}`);
+    return match[1];
   }
   lastCode(to: string): string {
     const message = [...this.sent].reverse().find((m) => m.to === to);
@@ -120,7 +131,7 @@ describe('Blog API (integration)', () => {
 
     dataSource = app.get<DataSource>(getDataSourceToken());
     await dataSource.query(
-      'TRUNCATE TABLE mail_tokens, sessions, comments, posts_tags_tags, posts, tags, users RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE recovery_codes, mail_tokens, sessions, comments, posts_tags_tags, posts, tags, users RESTART IDENTITY CASCADE',
     );
     // The first admin was created at start, then wiped by the line above.
     await app.get(AdminBootstrapService).onApplicationBootstrap();
@@ -378,9 +389,11 @@ describe('Blog API (integration)', () => {
         .set(bearer(admin.accessToken))
         .send({ name: 'Made By Admin', email });
       expect(created.status).toBe(201);
-      expect(created.body.defaultPassword).toBeTruthy();
+      // The password goes to the new user's inbox, never into the response.
+      expect(created.body.defaultPassword).toBeUndefined();
+      const madePassword = mail.lastPassword(email);
       // Already verified, so it can sign in straight away.
-      const made = await login(email, created.body.defaultPassword);
+      const made = await login(email, madePassword);
       const madeId = created.body.user.id as number;
 
       const self = await http().get('/users/me').set(bearer(admin.accessToken));
@@ -391,16 +404,121 @@ describe('Blog API (integration)', () => {
 
       const off = await http().patch(`/users/${madeId}/deactivate`).set(bearer(admin.accessToken));
       expect(off.status).toBe(200);
-      expect((await http().post('/auth/login').send({ email, password: created.body.defaultPassword })).status).toBe(403);
+      expect((await http().post('/auth/login').send({ email, password: madePassword })).status).toBe(403);
       expect((await http().post('/auth/refresh').send({ refreshToken: made.refreshToken })).status).toBe(401);
 
       const on = await http().patch(`/users/${madeId}/activate`).set(bearer(admin.accessToken));
       expect(on.status).toBe(200);
-      expect((await login(email, created.body.defaultPassword)).accessToken).toBeTruthy();
+      expect((await login(email, madePassword)).accessToken).toBeTruthy();
+    });
+
+    it('shows the password once only when mail is down outside production', async () => {
+      const admin = await login('admin@e2e.test', 'Admin-Passw0rd-e2e!');
+      mail.failing = true;
+      try {
+        const created = await http()
+          .post('/users')
+          .set(bearer(admin.accessToken))
+          .send({ name: 'No Mail', email: nextEmail('nomail') });
+        expect(created.status).toBe(201);
+        expect(created.body.defaultPassword).toBeTruthy();
+      } finally {
+        mail.failing = false;
+      }
     });
 
     it('answers 404 for Google sign-in when it is not configured', async () => {
       expect((await http().get('/auth/google')).status).toBe(404);
+    });
+  });
+
+  describe('two-factor authentication', () => {
+    // Codes must be newer than the last one accepted, so each step of a test
+    // uses a later time step: enable on now-1, sign in on now, disable on now+1.
+    const totp = (secret: string, offset: number) =>
+      hotp(base32Decode(secret), timeStep() + offset);
+
+    it('walks through setup, sign-in with a code, a backup code, and turning it off', async () => {
+      const user = await signUp('Two Factor');
+
+      const setup = await http().post('/auth/2fa/setup').set(bearer(user.accessToken));
+      expect(setup.status).toBe(200);
+      const secret = setup.body.secret as string;
+      expect(setup.body.otpauthUrl).toContain(`secret=${secret}`);
+
+      // Not on yet: signing in still works with the password alone.
+      expect((await http().post('/auth/login').send({ email: user.email, password: PASSWORD })).body.accessToken).toBeTruthy();
+
+      const wrong = await http().post('/auth/2fa/enable').set(bearer(user.accessToken)).send({ code: '000000' });
+      expect(wrong.status).toBe(400);
+
+      const enabled = await http()
+        .post('/auth/2fa/enable')
+        .set(bearer(user.accessToken))
+        .send({ code: totp(secret, -1) });
+      expect(enabled.status).toBe(200);
+      const recoveryCodes = enabled.body.recoveryCodes as string[];
+      expect(recoveryCodes).toHaveLength(8);
+      expect((await http().post('/auth/2fa/setup').set(bearer(user.accessToken))).status).toBe(409);
+      expect((await http().get('/users/me').set(bearer(user.accessToken))).body.twoFactorEnabled).toBe(true);
+
+      // The secret is encrypted in the database.
+      const stored = await dataSource.query('SELECT "twoFactorSecret" FROM users WHERE email = $1', [user.email]);
+      expect(stored[0].twoFactorSecret).toBeTruthy();
+      expect(stored[0].twoFactorSecret).not.toContain(secret);
+
+      // Password alone no longer gives tokens.
+      const step1 = await http().post('/auth/login').send({ email: user.email, password: PASSWORD });
+      expect(step1.status).toBe(201);
+      expect(step1.body.twoFactorRequired).toBe(true);
+      expect(step1.body.accessToken).toBeUndefined();
+      const challengeToken = step1.body.challengeToken as string;
+      // A challenge is not an access token.
+      expect((await http().get('/users/me').set(bearer(challengeToken))).status).toBe(401);
+
+      const second = (code: string, email = user.email) =>
+        http().post('/auth/2fa/login').send({ email, challengeToken, code });
+      expect((await second('000000')).status).toBe(401);
+      expect((await second(totp(secret, 0), 'someone-else@e2e.test')).status).toBe(401);
+      const code = totp(secret, 0);
+      const done = await second(code);
+      expect(done.status).toBe(200);
+      expect(done.body.accessToken).toBeTruthy();
+      expect(done.body.refreshToken).toBeTruthy();
+      // The same code cannot be used twice.
+      expect((await second(code)).status).toBe(401);
+
+      // A backup code works once.
+      const again = await http().post('/auth/login').send({ email: user.email, password: PASSWORD });
+      const viaBackup = await http()
+        .post('/auth/2fa/login')
+        .send({ email: user.email, challengeToken: again.body.challengeToken, code: recoveryCodes[0].toLowerCase() });
+      expect(viaBackup.status).toBe(200);
+      const reuse = await http().post('/auth/login').send({ email: user.email, password: PASSWORD });
+      const reused = await http()
+        .post('/auth/2fa/login')
+        .send({ email: user.email, challengeToken: reuse.body.challengeToken, code: recoveryCodes[0] });
+      expect(reused.status).toBe(401);
+
+      // Turning it off needs the password and a current code.
+      const disableBody = (password: string) => ({ password, code: totp(secret, 1) });
+      expect(
+        (await http().post('/auth/2fa/disable').set(bearer(user.accessToken)).send(disableBody('Wrong-Passw0rd!'))).status,
+      ).toBe(401);
+      expect(
+        (await http().post('/auth/2fa/disable').set(bearer(user.accessToken)).send(disableBody(PASSWORD))).status,
+      ).toBe(200);
+      const plain = await http().post('/auth/login').send({ email: user.email, password: PASSWORD });
+      expect(plain.body.accessToken).toBeTruthy();
+      expect(plain.body.twoFactorRequired).toBeUndefined();
+    });
+
+    it('needs sign-in for setup, and a challenge for the second step', async () => {
+      expect((await http().post('/auth/2fa/setup')).status).toBe(401);
+      const res = await http()
+        .post('/auth/2fa/login')
+        .send({ email: 'a@e2e.test', challengeToken: 'nope', code: '123456' });
+      expect(res.status).toBe(401);
     });
   });
 
