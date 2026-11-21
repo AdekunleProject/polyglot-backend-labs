@@ -11,7 +11,9 @@ import { JwtStrategy } from 'src/common/strategies/jwt.strategy';
 // import {StringValue} from 'ms'
 import { UsersModule } from '../users/user.module';
 import { MailToken, MailTokenSchema } from 'src/users/schemas/mail.schema';
-import { MailService } from 'src/helpers/mail/mail-service';
+import { MailModule } from 'src/helpers/mail/mail.module';
+import { TwoFactorController } from './two-factor/two-factor.controller';
+import { TwoFactorService } from './two-factor/two-factor.service';
 import { GoogleStrategy } from '../common/strategies/google.strategy';
 import { FileUpload } from 'src/aws/aws.file-upload';
 import { NotificationsModule } from 'src/notifications/notification.module';
@@ -22,6 +24,7 @@ import { NotificationsModule } from 'src/notifications/notification.module';
     ConfigModule,
     UsersModule,
     NotificationsModule,
+    MailModule,
 
     JwtModule.registerAsync({
       inject: [ConfigService],
@@ -42,91 +45,16 @@ import { NotificationsModule } from 'src/notifications/notification.module';
       { name: MailToken.name, schema: MailTokenSchema },
     ]),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, TwoFactorController],
 
   providers: [
     AuthService,
+    TwoFactorService,
     JwtStrategy,
     GoogleStrategy,
-    MailService,
     FileUpload,
   ],
 
   exports: [AuthService],
 })
 export class AuthModule {}
-
-// import { Module } from '@nestjs/common';
-
-// import { JwtModule } from '@nestjs/jwt';
-
-// import { PassportModule } from '@nestjs/passport';
-
-// import { ConfigModule } from '@nestjs/config';
-
-// import { ConfigService } from '@nestjs/config';
-
-// import { MongooseModule } from '@nestjs/mongoose';
-
-// import { AuthController } from './auth.controller';
-
-// import { AuthService } from './auth.service';
-
-// import { JwtStrategy } from '../common/strategies/jwt.strategy';
-
-// import { User, UserSchema } from '../users/schemas/user.schema';
-
-// import { UsersModule } from '../users/users.module';
-
-// @Module({
-//   imports: [
-//     ConfigModule,
-
-//     PassportModule,
-
-//     UsersModule,
-
-//     MongooseModule.forFeature([
-//       {
-//         name: User.name,
-//         schema: UserSchema,
-//       },
-//     ]),
-
-//     JwtModule.registerAsync({
-//       imports: [ConfigModule],
-
-//       inject: [ConfigService],
-
-//       useFactory: (
-//         configService: ConfigService,
-//       ) => ({
-//         secret:
-//           configService.get<string>(
-//             'JWT_SECRET',
-//           ),
-
-//         signOptions: {
-//           expiresIn:
-//             configService.get<string>(
-//               'JWT_EXPIRES_IN',
-//             ),
-//         },
-//       }),
-//     }),
-//   ],
-
-//   controllers: [AuthController],
-
-//   providers: [
-//     AuthService,
-//     JwtStrategy,
-//   ],
-
-//   exports: [
-//     AuthService,
-//     JwtModule,
-//     PassportModule,
-//   ],
-// })
-// export class AuthModule {}

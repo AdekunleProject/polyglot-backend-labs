@@ -22,9 +22,23 @@ export class MailService {
     });
   }
 
-  sendEmail = async (email: string, subject: string, text: string) => {
+  /**
+   * Never throws: a mail outage must not break sign-up or password reset.
+   * Returns whether the message was handed to the mail server, for the few
+   * callers that must know (an admin-created account's password).
+   */
+  sendEmail = async (
+    email: string,
+    subject: string,
+    text: string,
+  ): Promise<boolean> => {
     if (!this.transporter) {
-      return;
+      // Local runs without a mail server: print the message so a developer
+      // can read the code. Never in production, where it would leak codes.
+      if (process.env.NODE_ENV !== 'production') {
+        this.logger.log(`[mail disabled] to=${email} subject="${subject}" ${text}`);
+      }
+      return false;
     }
     try {
       await this.transporter.sendMail({
@@ -34,8 +48,10 @@ export class MailService {
         text,
       });
       this.logger.log(`Email sent to ${email}`);
+      return true;
     } catch (error) {
       this.logger.error(`Could not send email to ${email}`, error as Error);
+      return false;
     }
   };
 }

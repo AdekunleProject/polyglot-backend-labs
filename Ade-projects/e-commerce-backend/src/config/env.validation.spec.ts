@@ -31,4 +31,14 @@ describe('validateEnv', () => {
       validateEnv({ ...base, JWT_REFRESH_SECRET: strong, NODE_ENV: 'production' }),
     ).toThrow(/must be different/);
   });
+
+  it('checks the optional Redis URL and two-factor key', () => {
+    expect(() => validateEnv({ ...base, REDIS_URL: 'localhost:6379' })).toThrow(
+      /REDIS_URL must start with redis/,
+    );
+    expect(() => validateEnv({ ...base, REDIS_URL: 'redis://redis:6379' })).not.toThrow();
+    expect(() => validateEnv({ ...base, TWO_FACTOR_KEY: 'short' })).toThrow(
+      /TWO_FACTOR_KEY must be at least 16/,
+    );
+  });
 });

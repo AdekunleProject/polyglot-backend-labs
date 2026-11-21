@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -15,15 +14,21 @@ import { ResetPasswordDto } from '../auth/dto/reset-password.dto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { MailService } from '../helpers/mail/mail-service';
-import { MailToken } from '../users/schemas/mail.schema';
+import { MailToken, MailTokenPurpose } from '../users/schemas/mail.schema';
 import { Role } from 'src/common/enums/role.enum';
 import { FileUpload } from 'src/aws/aws.file-upload';
 import { AuthProvider } from 'src/common/enums/auth-provider.enum';
 import { ProfileImageProvider } from '../common/enums/profile-image-provider.enum';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { hashToken, sameHash } from './token-hash';
+import { generateVerificationCode, hashCode } from './verification-code';
+import { TwoFactorService } from './two-factor/two-factor.service';
+import { TwoFactorLoginDto } from './two-factor/dto/two-factor.dto';
 import { NotificationsService } from 'src/notifications/notification.service';
 import { NotificationType } from 'src/notifications/schemas/notification.schema';
+
+const BCRYPT_ROUNDS = 12;
+const CODE_TTL_MINUTES = 15;
 
 @Injectable()
 export class AuthService {
@@ -35,7 +40,12 @@ export class AuthService {
     private mailService: MailService,
     private readonly fileUpload: FileUpload,
     private readonly notificationsService: NotificationsService,
+    private readonly twoFactor: TwoFactorService,
   ) {}
+
+  // Compared against when the email is unknown, so a login for a real account
+  // and one for a made-up address take about the same time.
+  private readonly dummyHash = bcrypt.hash('not-a-real-password', BCRYPT_ROUNDS);
 
   // Token lifetimes come from the environment (JWT_EXPIRES_IN and
   // JWT_REFRESH_EXPIRES_IN). They used to be hard-coded to 15m and 30d, so
@@ -119,17 +129,49 @@ export class AuthService {
     return this.fileUpload.getDownloadUrl(user.profileImage);
   }
 
-  // 6-character alphanumeric code, uppercase, avoiding visually ambiguous
-  // characters (0/O, 1/I/L) since it's meant to be typed by hand from an
-  // email rather than clicked as a link. crypto.randomInt is used (not
-  // Math.random) since this guards account access.
-  private generateVerificationCode(): string {
-    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars[crypto.randomInt(chars.length)];
-    }
-    return code;
+  private signAccessToken(user: User): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: user._id.toString(), email: user.email, role: user.role },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+        expiresIn: this.accessTokenTtl,
+      },
+    );
+  }
+
+  // Makes a fresh code for one purpose, replacing any earlier one, stores only
+  // its hash, and emails it.
+  private async sendCode(
+    user: User,
+    purpose: MailTokenPurpose,
+    subject: string,
+    describe: (code: string) => string,
+  ) {
+    const code = generateVerificationCode();
+    await this.mailTokenModel.deleteMany({ userId: user._id, purpose });
+    await new this.mailTokenModel({
+      userId: user._id,
+      purpose,
+      token: hashCode(user._id.toString(), purpose, code),
+      expiryDate: new Date(Date.now() + CODE_TTL_MINUTES * 60_000),
+    }).save();
+    await this.mailService.sendEmail(user.email, subject, describe(code));
+  }
+
+  // True once, for the right code, in time. Deleting is the check, so two
+  // requests with the same code cannot both succeed.
+  private async consumeCode(
+    user: User,
+    purpose: MailTokenPurpose,
+    code: string,
+  ): Promise<boolean> {
+    const found = await this.mailTokenModel.findOneAndDelete({
+      userId: user._id,
+      purpose,
+      token: hashCode(user._id.toString(), purpose, code),
+      expiryDate: { $gt: new Date() },
+    });
+    return !!found;
   }
 
   async signup(signupDto: SignupDto, image?: Express.Multer.File) {
@@ -144,7 +186,10 @@ export class AuthService {
       if (image) {
         profileImage = await this.fileUpload.uploadFile(image, 'users');
       }
-      const hashedPassword = await bcrypt.hash(signupDto.password, 12);
+      const hashedPassword = await bcrypt.hash(
+        signupDto.password,
+        BCRYPT_ROUNDS,
+      );
       const user = new this.userModel({
         firstname: signupDto.firstname,
         lastname: signupDto.lastname,
@@ -173,18 +218,12 @@ export class AuthService {
 
       const { password, ...userData } = savedUser.toObject();
       const resolvedProfileImage = await this.resolveProfileImage(savedUser);
-      const expiryDate = new Date();
-      expiryDate.setMinutes(expiryDate.getMinutes() + 15);
-      const code = this.generateVerificationCode();
-      await new this.mailTokenModel({
-        userId: savedUser._id,
-        token: code,
-        expiryDate,
-      }).save();
-      await this.mailService.sendEmail(
-        savedUser.email,
+      await this.sendCode(
+        savedUser,
+        MailTokenPurpose.VERIFY_EMAIL,
         'Verify your email',
-        `Your verification code is ${code}. It expires in 15 minutes.`,
+        (code) =>
+          `Your verification code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
       );
       return {
         message: 'Thank you for signing up. Please verify your email.',
@@ -256,17 +295,7 @@ export class AuthService {
       }
     }
 
-    const accessToken = await this.jwtService.signAsync(
-      {
-        sub: user._id.toString(),
-        email: user.email,
-        role: user.role,
-      },
-      {
-        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
-        expiresIn: this.accessTokenTtl,
-      },
-    );
+    const accessToken = await this.signAccessToken(user);
     const refreshToken = await this.startSession(user._id.toString());
     const profileImage = await this.resolveProfileImage(user);
     return {
@@ -284,95 +313,99 @@ export class AuthService {
   }
 
   async verifyUser(email: string, code: string) {
-    try {
-      const user = await this.userModel.findOne({ email });
-
-      if (!user) {
-        throw new NotFoundException('User not found');
-      }
-
-      // BUG FIX: the original query had `userId` commented out, so a code
-      // wasn't actually scoped to the user it was issued to. Harmless with
-      // a 64-char hex token (collision was practically impossible) but a
-      // real problem with a 6-char code — restored the userId scoping.
-      const verification = await this.mailTokenModel.findOneAndDelete({
-        userId: user._id,
-        token: code.toUpperCase(),
-        expiryDate: { $gt: new Date() },
-      });
-
-      if (!verification) {
-        throw new BadRequestException('Invalid or expired verification code');
-      }
-      user.isVerified = true;
-      await user.save();
-      console.log('Email verified successfully');
-      return {
-        message: 'Email verified successfully',
-      };
-    } catch (error) {
-      console.log(error, 'Error occurred when verifing email');
-      throw error;
+    const user = await this.userModel.findOne({ email });
+    // The same answer whether the email is unknown or the code is wrong.
+    if (
+      !user ||
+      !(await this.consumeCode(user, MailTokenPurpose.VERIFY_EMAIL, code))
+    ) {
+      throw new BadRequestException('Invalid or expired verification code');
     }
+    user.isVerified = true;
+    await user.save();
+    return { message: 'Email verified successfully' };
+  }
+
+  async resendVerification(email: string) {
+    const user = await this.userModel.findOne({ email });
+    if (user && !user.isVerified) {
+      await this.sendCode(
+        user,
+        MailTokenPurpose.VERIFY_EMAIL,
+        'Verify your email',
+        (code) =>
+          `Your verification code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
+      );
+    }
+    // Same answer either way, so this cannot be used to find registered emails.
+    return {
+      message:
+        'If that email has an account waiting for verification, a new code has been sent.',
+    };
   }
 
   async login(loginDto: LoginDto) {
-    try {
-      const { email, password } = loginDto;
-      const user = await this.userModel.findOne({ email }).select('+password');
-      if (!user) {
-        throw new UnauthorizedException('Invalid credentials');
-      }
-      const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (!isPasswordValid) {
-        throw new UnauthorizedException('Wrong password');
-      }
-      if (user.provider === AuthProvider.GOOGLE && !user.password) {
-        throw new UnauthorizedException('Please continue with Google Sign-In.');
-      }
-      if (!user.isVerified) {
-        throw new UnauthorizedException(
-          'Please verify your email before logging in.',
-        );
-      }
-      const accessToken = await this.jwtService.signAsync(
-        {
-          sub: user._id.toString(),
-          email: user.email,
-          role: user.role,
-        },
-        {
-          secret: this.configService.getOrThrow('JWT_SECRET'),
-          expiresIn: this.accessTokenTtl,
-        },
-      );
-      const refreshToken = await this.startSession(user._id.toString());
-
-      await this.notificationsService.notifyUser(
-        user._id,
-        NotificationType.USER_LOGIN,
-        'New sign-in',
-        `You signed in to your account on ${new Date().toLocaleString()}.`,
-      );
-
-      const profileImage = await this.resolveProfileImage(user);
-      console.log('User logged in successfully');
-      return {
-        accessToken,
-        refreshToken,
-        user: {
-          id: user._id,
-          firstname: user.firstname,
-          lastname: user.lastname,
-          email: user.email,
-          profileImage,
-          role: user.role,
-        },
-      };
-    } catch (error) {
-      console.log(error, 'Error occurred during login');
-      throw error;
+    const { email, password } = loginDto;
+    const user = await this.userModel.findOne({ email }).select('+password');
+    // Always compare against a hash: unknown email, Google-only account (no
+    // password) and wrong password are all the same answer and take the same time.
+    const matches = await bcrypt.compare(
+      password,
+      user?.password || (await this.dummyHash),
+    );
+    if (!user || !user.password || !matches) {
+      throw new UnauthorizedException('Invalid email or password');
     }
+    if (!user.isVerified) {
+      throw new UnauthorizedException(
+        'Please verify your email before logging in.',
+      );
+    }
+    if (user.twoFactorEnabled) {
+      // Password was right, but no tokens until the second factor is too.
+      return {
+        twoFactorRequired: true as const,
+        challengeToken: await this.twoFactor.createChallenge(user),
+        message:
+          'Enter the code from your authenticator app at POST /auth/2fa/login.',
+      };
+    }
+    return this.issueTokens(user);
+  }
+
+  async loginWithTwoFactor(dto: TwoFactorLoginDto) {
+    const user = await this.twoFactor.verifyLogin(
+      dto.email,
+      dto.challengeToken,
+      dto.code,
+    );
+    return this.issueTokens(user);
+  }
+
+  private async issueTokens(user: User) {
+    const accessToken = await this.signAccessToken(user);
+    const refreshToken = await this.startSession(user._id.toString());
+
+    await this.notificationsService.notifyUser(
+      user._id,
+      NotificationType.USER_LOGIN,
+      'New sign-in',
+      `You signed in to your account on ${new Date().toLocaleString()}.`,
+    );
+
+    const profileImage = await this.resolveProfileImage(user);
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        firstname: user.firstname,
+        lastname: user.lastname,
+        email: user.email,
+        profileImage,
+        role: user.role,
+      },
+    };
   }
 
   async refreshToken(dto: RefreshTokenDto) {
@@ -419,17 +452,7 @@ export class AuthService {
       );
     }
 
-    const accessToken = await this.jwtService.signAsync(
-      {
-        sub: user._id.toString(),
-        email: user.email,
-        role: user.role,
-      },
-      {
-        secret: this.configService.getOrThrow('JWT_SECRET'),
-        expiresIn: this.accessTokenTtl,
-      },
-    );
+    const accessToken = await this.signAccessToken(user);
 
     return { accessToken, refreshToken };
   }
@@ -443,32 +466,17 @@ export class AuthService {
 
   async forgotPassword(email: string) {
     const user = await this.userModel.findOne({ email });
-    if (!user) {
-      // Same answer as for a real account, so this endpoint cannot be used
-      // to find out which emails are registered.
-      return {
-        message: 'If that email is registered, a reset code has been sent.',
-      };
+    if (user) {
+      await this.sendCode(
+        user,
+        MailTokenPurpose.RESET_PASSWORD,
+        'Reset your password',
+        (code) =>
+          `Your password reset code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
+      );
     }
-    // Standardized to 15 minutes — was 2m30s, unusually short for a code
-    // someone has to read from their inbox and type in by hand.
-    const expiryDate = new Date();
-    expiryDate.setMinutes(expiryDate.getMinutes() + 15);
-    const code = this.generateVerificationCode();
-    await this.mailTokenModel.deleteMany({
-      userId: user._id,
-    });
-
-    await new this.mailTokenModel({
-      userId: user._id,
-      token: code,
-      expiryDate,
-    }).save();
-    await this.mailService.sendEmail(
-      user.email,
-      'Reset your password',
-      `Your password reset code is ${code}. It expires in 15 minutes.`,
-    );
+    // Same answer for a real account and an unknown one, so this endpoint
+    // cannot be used to find out which emails are registered.
     return {
       message: 'If that email is registered, a reset code has been sent.',
     };
@@ -479,52 +487,25 @@ export class AuthService {
     code: string,
     resetPasswordDto: ResetPasswordDto,
   ) {
-    const user = await this.userModel.findOne({ email });
-    if (!user) {
-      throw new NotFoundException("users doesn't exist");
-    }
-
-    // BUG FIX: this queried `{ Token: token, ... }` — capital T, but the
-    // schema field is `token` (lowercase). That mismatch meant this query
-    // could never match a real document, so reset-password threw "invalid
-    // token" on every single attempt, no matter how correct the code was.
-    // Also now scoped to this user's own token, same fix as verifyUser().
-    const verification = await this.mailTokenModel.findOneAndDelete({
-      userId: user._id,
-      token: code.toUpperCase(),
-      expiryDate: { $gte: new Date() },
-    });
-    if (!verification) {
-      throw new NotFoundException('Invalid or expired code');
-    }
     const { newPassword, confirmPassword } = resetPasswordDto;
+    // Checked before the code is used up, so a typo does not burn it.
     if (newPassword !== confirmPassword) {
-      throw new NotFoundException("Password doesn't match");
+      throw new BadRequestException('Passwords do not match');
     }
-    user.password = await bcrypt.hash(newPassword, 10);
+    const user = await this.userModel.findOne({ email });
+    if (
+      !user ||
+      !(await this.consumeCode(user, MailTokenPurpose.RESET_PASSWORD, code))
+    ) {
+      throw new BadRequestException('Invalid or expired code');
+    }
+    user.password = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    // They proved they own the mailbox, so a pending verification is moot.
+    user.isVerified = true;
     await user.save();
     // A new password signs the account out everywhere.
     await this.userModel.updateOne({ _id: user._id }, { $set: { sessions: [] } });
-    // await this.mailTokenModel.deleteOne({
-    //   _id: verification._id,
-    // });
-    console.log('password reset successfully');
-    return {
-      message: 'Password reset successfully',
-    };
-  }
-
-  async validateResetToken(token: string) {
-    const resetToken = await this.mailTokenModel.findOne({
-      token,
-      expiryDate: {
-        $gt: new Date(),
-      },
-    });
-
-    if (!resetToken) {
-      throw new BadRequestException('Token is invalid or expired');
-    }
+    return { message: 'Password reset successfully' };
   }
 
   async logout(userId: string, refreshToken?: string) {

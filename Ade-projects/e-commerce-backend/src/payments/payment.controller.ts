@@ -13,6 +13,7 @@ import {
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { PaymentsService } from './payment.service';
 import { InitializePaymentDto } from './dto/initialize-payment.dto';
 import { Role } from 'src/common/enums/role.enum';
@@ -39,6 +40,9 @@ export class PaymentsController {
     return this.paymentsService.initializePayment(user.id, dto);
   }
 
+  // Paystack calls this in bursts from a few addresses. The signature check, not
+  // the rate limit, is what keeps it safe.
+  @SkipThrottle()
   @Post('webhook')
   @HttpCode(200)
   webhook(

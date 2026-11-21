@@ -29,6 +29,9 @@ import { GoogleAuthGuard } from '../common/guards/google.auth';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { Throttle } from '@nestjs/throttler';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { ThrottleByEmail } from './email-throttler.guard';
+import { perMinute } from './throttle';
 
 @Controller('auth/')
 export class AuthController {
@@ -53,7 +56,8 @@ export class AuthController {
     );
   }
 
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle(perMinute(5))
+  @ThrottleByEmail()
   @Post('verify-email')
   async emailVerify(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyUser(dto.email, dto.code);
@@ -65,30 +69,42 @@ export class AuthController {
     return user;
   }
 
+  @Throttle(perMinute(3))
+  @ThrottleByEmail()
+  @Post('resend-verification')
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    return this.authService.resendVerification(dto.email);
+  }
+
+  @Throttle(perMinute(10))
   @Post('signup')
   @UseInterceptors(FileInterceptor('image', uploadOptions))
   signup(@Body() dto: SignupDto, @UploadedFile() image?: Express.Multer.File) {
     return this.authService.signup(dto, image);
   }
 
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle(perMinute(5))
+  @ThrottleByEmail()
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }
 
+  @Throttle(perMinute(30))
   @Post('refresh')
   refreshToken(@Body() dto: RefreshTokenDto) {
     return this.authService.refreshToken(dto);
   }
 
-  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Throttle(perMinute(3))
+  @ThrottleByEmail()
   @Post('forgot-password')
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
     return this.authService.forgotPassword(forgotPasswordDto.email);
   }
 
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle(perMinute(5))
+  @ThrottleByEmail()
   @Post('reset-password')
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(

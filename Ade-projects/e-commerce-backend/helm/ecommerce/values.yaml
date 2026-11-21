@@ -29,6 +29,10 @@ config:
   AWS_S3_BUCKET: placeholder
   ADMIN_EMAIL: admin@example.com
   ENABLE_DOCS: "true"
+  # Behind the ingress, so rate limits see the real client address.
+  TRUST_PROXY: "true"
+  # Share rate limit counters between pods (a managed Redis, for example):
+  # REDIS_URL: redis://my-redis:6379
   MAIL_PORT: "587"
 
 resources:

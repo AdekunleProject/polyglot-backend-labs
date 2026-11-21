@@ -50,6 +50,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.2.0",
+    "ioredis": "^5.4.1",
     "joi": "^18.2.3",
     "mongoose": "^9.7.4",
     "mongoose-paginate-v2": "^1.9.5",

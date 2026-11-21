@@ -5,8 +5,11 @@ import {
   InternalServerErrorException,
   Inject,
   BadRequestException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectModel, MongooseModule } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
+import { MailService } from '../helpers/mail/mail-service';
 
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Module } from '@nestjs/common';
@@ -31,6 +34,8 @@ export class UsersService {
     private readonly userModel: Model<User>,
     private readonly fileUpload: FileUpload,
     private readonly notificationsService: NotificationsService,
+    private readonly mailService: MailService,
+    private readonly config: ConfigService,
   ) {}
   async create(data: CreateUserDto) {
     try {
@@ -209,6 +214,15 @@ export class UsersService {
     }
   }
 
+  /**
+   * Admin creates an account. A one-time password is generated and emailed to
+   * the new user, who should change it at once.
+   *
+   * The password is not in the response, so the admin never sees it. If mail
+   * is not set up: in production the user is not created (there would be no
+   * safe way to hand over the password); elsewhere it is returned, so a
+   * development setup without a mail server still works.
+   */
   async createAdminProfile(
     userId: string,
     createAdminProfileDto: CreateAdminProfileDto,
@@ -224,7 +238,7 @@ export class UsersService {
       throw new BadRequestException('User already exists');
     }
     const defaultPassword = randomBytes(9).toString('base64url');
-    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    const hashedPassword = await bcrypt.hash(defaultPassword, 12);
 
     const user = new this.userModel({
       firstname: createAdminProfileDto.firstname,
@@ -236,6 +250,26 @@ export class UsersService {
       // profileImage: String
     });
     await user.save();
+
+    const emailed = await this.mailService.sendEmail(
+      user.email,
+      'Your account has been created',
+      [
+        `Hello ${user.firstname},`,
+        '',
+        'An account was created for you.',
+        `Email: ${user.email}`,
+        `Temporary password: ${defaultPassword}`,
+        '',
+        'Sign in and change this password straight away.',
+      ].join('\n'),
+    );
+    if (!emailed && this.config.get('NODE_ENV') === 'production') {
+      await this.userModel.deleteOne({ _id: user._id });
+      throw new ServiceUnavailableException(
+        'The email could not be sent, so the user was not created. Check the mail settings and try again.',
+      );
+    }
 
     await this.notificationsService.notifyUser(
       user._id,
@@ -252,16 +286,24 @@ export class UsersService {
       user._id,
     );
 
+    const created = {
+      id: user._id,
+      firstname: user.firstname,
+      lastname: user.lastname,
+      email: user.email,
+      role: user.role,
+    };
+    if (emailed) {
+      return {
+        message: 'User created. The temporary password was emailed to them.',
+        user: created,
+      };
+    }
     return {
-      message: 'User created successfully',
+      message:
+        'User created. Email is not available here, so the temporary password is shown once (never in production).',
       defaultPassword,
-      user: {
-        id: user._id,
-        firstname: user.firstname,
-        lastname: user.lastname,
-        email: user.email,
-        role: user.role,
-      },
+      user: created,
     };
   }
 

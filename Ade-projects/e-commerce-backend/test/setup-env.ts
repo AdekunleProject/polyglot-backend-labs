@@ -21,6 +21,11 @@ process.env.AWS_S3_BUCKET = 'e2e';
 process.env.ADMIN_EMAIL = '';
 process.env.ADMIN_PASSWORD = '';
 process.env.MAIL_HOST = '';
+// Rate limits are real in the app (the guards are registered in AppModule), so
+// the tests raise them instead of switching them off.
+process.env.THROTTLE_LIMIT = '100000';
+process.env.THROTTLE_MULTIPLIER = '1000';
+process.env.REDIS_URL = '';
 
 // Safety: the test wipes its database, so it must be clearly a test database.
 const dbName = new URL(process.env.MONGODB_URI).pathname.replace('/', '');

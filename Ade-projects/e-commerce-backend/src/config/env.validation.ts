@@ -30,6 +30,13 @@ export function validateEnv(
     }
   }
 
+  if (get('REDIS_URL') && !/^rediss?:\/\//.test(get('REDIS_URL'))) {
+    problems.push('REDIS_URL must start with redis:// or rediss://');
+  }
+  if (get('TWO_FACTOR_KEY') && get('TWO_FACTOR_KEY').length < 16) {
+    problems.push('TWO_FACTOR_KEY must be at least 16 characters');
+  }
+
   if (problems.length > 0) {
     throw new Error(
       `Invalid environment configuration:\n - ${problems.join('\n - ')}`,

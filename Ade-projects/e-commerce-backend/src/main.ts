@@ -2,12 +2,21 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filters';
 import { AppModule } from './app.module';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
+
+  // Lets Kubernetes stop the pod cleanly: in-flight requests finish and the
+  // database connection closes before the process exits.
+  app.enableShutdownHooks();
+
+  // Behind a load balancer or ingress, trust its X-Forwarded-For so rate
+  // limiting sees the real client address and not the proxy's.
+  if (process.env.TRUST_PROXY === 'true') {
+    app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  }
 
   app.use(helmet({ contentSecurityPolicy: false }));
 
@@ -27,11 +36,13 @@ async function bootstrap() {
     credentials: true,
   });
 
-  app.useGlobalGuards(app.get(ThrottlerGuard));
-
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  if (process.env.ENABLE_DOCS !== 'false') {
+  // Swagger is on for development and off in production unless ENABLE_DOCS=true.
+  const docsEnabled = process.env.ENABLE_DOCS
+    ? process.env.ENABLE_DOCS === 'true'
+    : process.env.NODE_ENV !== 'production';
+  if (docsEnabled) {
     const config = new DocumentBuilder()
       .setTitle('E-commerce API')
       .setDescription(

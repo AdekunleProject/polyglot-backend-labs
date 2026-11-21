@@ -53,7 +53,12 @@ jobs:
             docker exec itmongo mongosh --quiet --eval "db.hello().isWritablePrimary" | grep -q true && break
             sleep 2
           done
-          docker run --rm --network host ecommerce-test pnpm test:e2e
+          docker run -d --name itredis -p 6379:6379 redis:7-alpine
+          for i in $(seq 1 30); do
+            docker exec itredis redis-cli ping && break
+            sleep 1
+          done
+          docker run --rm --network host -e REDIS_TEST_URL=redis://localhost:6379 ecommerce-test pnpm test:e2e
 
       - name: Build production image
         run: docker build -t "$IMAGE:$GITHUB_SHA" "$APP_DIR"
@@ -71,6 +76,7 @@ jobs:
         run: |
           docker network create ci
           docker run -d --name mongo --network ci mongo:7
+          docker run -d --name redis --network ci redis:7-alpine
           docker run -d --name api --network ci -p 5000:5000 \
             -e MONGODB_URI=mongodb://mongo:27017/ecommerce \
             -e JWT_SECRET=ci-access-secret-0123456789abcdef0123 \
@@ -79,7 +85,7 @@ jobs:
             -e GOOGLE_CLIENT_ID=ci -e GOOGLE_CLIENT_SECRET=ci \
             -e GOOGLE_CALLBACK_URL=http://localhost/cb \
             -e PAYSTACK_SECRET_KEY=ci -e PAYSTACK_CALLBACK_URL=http://localhost/pay \
-            -e FRONTEND_URL=http://localhost:5173 \
+            -e FRONTEND_URL=http://localhost:5173 -e REDIS_URL=redis://redis:6379 \
             -e AWS_REGION=eu-north-1 -e AWS_ACCESS_KEY_ID=ci \
             -e AWS_SECRET_ACCESS_KEY=ci -e AWS_S3_BUCKET=ci \
             "$IMAGE:$GITHUB_SHA"

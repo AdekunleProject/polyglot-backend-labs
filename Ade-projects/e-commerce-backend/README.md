@@ -96,9 +96,7 @@ Put a Paystack **test** secret key (`sk_test_...`, from the Paystack dashboard i
 
 1. `POST /auth/login` as the admin, click **Authorize** in Swagger and paste the `accessToken`.
 2. Run the demo seed above (or create a brand, category, product and variant by hand with `POST /brands`, `/categories`, `/products` and `/variants`), then pick a variant id from `GET /variants/product/{productId}`.
-3. `POST /auth/signup` a customer. Email is not sent without SMTP settings, so read the 6-digit code from the database:
-   `docker compose exec mongo mongosh ecommerce --quiet --eval 'db.mailtokens.find().sort({createdAt:-1}).limit(1).forEach(d=>print(d.token))'`
-   then `POST /auth/verify-email` and `POST /auth/login`. Authorize as the customer.
+3. `POST /auth/signup` a customer. Email is not sent without SMTP settings, so read the 6-character code from the API log: `docker compose logs api | grep "mail disabled"` (codes are stored hashed, so the database no longer shows them). Then `POST /auth/verify-email` and `POST /auth/login`. Authorize as the customer.
 4. `POST /cart/items`, then `POST /orders` with a shipping address.
 5. `POST /payments/initialize` with the order id. Open the returned `authorizationUrl` and choose **Success** on the Paystack test page.
 6. As the admin, call `GET /payments/verify/{reference}`. It confirms the payment with Paystack and checks that the amount and currency match the order.
@@ -135,7 +133,10 @@ The app checks its settings when it starts. It refuses to boot if `MONGODB_URI`,
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` | File uploads to S3 |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Admin account created at start-up if missing |
 | `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, `MAIL_PASS`, `MAIL_FROM` | SMTP settings for verification and reset emails |
-| `ENABLE_DOCS` | Set to `false` to switch Swagger off |
+| `ENABLE_DOCS` | Swagger is on except when `NODE_ENV=production`; set `true` or `false` to override |
+| `THROTTLE_LIMIT`, `TRUST_PROXY` | Requests per minute per client address (default 60); set `TRUST_PROXY=true` behind a load balancer so limits see the real client address |
+| `REDIS_URL` | Share rate limit counters between replicas. Optional; without it, or while Redis is down, each instance counts alone |
+| `TWO_FACTOR_KEY` | Encrypts authenticator secrets in the database. Optional: `JWT_SECRET` is used when unset |
 
 The app reads the Google, Paystack, JWT and AWS keys with `getOrThrow`, so they must be present to start. They do not have to be real. Without real Google or Paystack keys the app runs and everything works except Google sign-in and real payments.
 
@@ -145,7 +146,7 @@ Full, interactive documentation is in Swagger at `/docs`. Main route groups:
 
 | Prefix | Purpose |
 | --- | --- |
-| `/auth` | `signup`, `verify-email`, `login`, `refresh`, `logout`, `me`, `forgot-password`, `reset-password`, `google` |
+| `/auth` | `signup`, `verify-email`, `resend-verification`, `login`, `refresh`, `logout`, `me`, `forgot-password`, `reset-password`, `google`, and `2fa/setup`, `2fa/enable`, `2fa/disable`, `2fa/login` |
 | `/users` | List users (admin), create users |
 | `/products`, `/variants` | Products, variants and stock updates |
 | `/brands`, `/categories` | Catalogue organisation |
@@ -247,7 +248,10 @@ It can be rebuilt from the same code in about 15 minutes.
 - A database credential that was committed in the early history of the repository was removed from the code. Anything that has touched Git history should be treated as exposed, so it must be rotated
 - Role guards protect admin routes; the guard denies access instead of crashing when no user is attached to the request
 - Global validation rejects unknown or malformed input
-- Helmet security headers and rate limiting are enabled
+- Helmet security headers and rate limiting are enabled. Auth routes have their own limits per client address and, for login, verification, resend, forgot and reset, also per email address, so a spread-out guessing attempt on one account is slowed too. Counters are shared across replicas when `REDIS_URL` is set
+- Verification and reset codes are stored only as hashes, tied to one purpose (a verification code cannot reset a password), single use, and expire after 15 minutes. Wrong email, wrong password and Google-only accounts all get the same login answer
+- Two-factor sign-in with an authenticator app (standard TOTP, RFC 6238): `POST /auth/2fa/setup` returns a secret and an `otpauthUrl`; `POST /auth/2fa/enable` with a code turns it on and returns 8 one-time backup codes; with it on, `POST /auth/login` returns `{ twoFactorRequired, challengeToken }` and `POST /auth/2fa/login` finishes the sign-in; `POST /auth/2fa/disable` needs the password and a code. Codes work once, the secret is stored encrypted (AES-256-GCM) and backup codes as hashes. Google sign-in does not ask for the second factor
+- A user created by an admin gets a one-time password by email, never in the response. If email is not set up, development shows it once in the response; production refuses and creates nothing
 - The container runs as a non-root user and the image is scanned on every build
 - Payment webhooks are verified with an HMAC signature
 - Refresh tokens are per device, stored only as SHA-256 hashes (never bcrypt, which ignores everything after 72 bytes and would accept an old token), and rotated on every use. Replaying an old token is treated as theft and ends that session. Resetting a password signs the account out everywhere. At most 5 devices stay signed in per user
@@ -255,6 +259,10 @@ It can be rebuilt from the same code in about 15 minutes.
 ## Known limitations
 
 - Because refresh tokens rotate, a client must save the new `refreshToken` that `/auth/refresh` returns and must not send two refresh calls for the same token at once, or it gets signed out. Sessions are not listed or revocable one by one from the API yet; logout ends the current device or all devices.
+- Two-factor has no admin reset yet: someone who loses both the authenticator and the backup codes needs a database change.
+- Rate limits are shared across replicas only when `REDIS_URL` is set. In Kubernetes, point it at a managed Redis (for example ElastiCache); the chart does not deploy one. Redis is used for the limiter only, not as a cache.
+- The temporary password for an admin-created user travels in a plain-text email until they change it, a common trade-off.
+- Google sign-in still returns its tokens in the redirect query string; the blog API uses the URL fragment, which keeps them out of server logs, but that needs a matching change in the frontend.
 - Lint is report-only in CI for now.
 - No queue for slow work such as emails, which are sent during the request.
 - The EKS cluster was destroyed after testing, so nothing is running. The chart's MongoDB is a single demo pod, and the app has not been load tested.

@@ -101,6 +101,22 @@ export class User extends Document {
   // token, never the token itself. Hidden from queries unless asked for.
   @Prop({ type: [SessionSchema], default: [], select: false })
   sessions!: Session[];
+
+  // Two-factor sign-in with an authenticator app (see auth/two-factor).
+  // The secret is stored encrypted, backup codes as hashes. Both hidden from
+  // queries unless asked for.
+  @Prop({ type: String, default: null, select: false })
+  twoFactorSecret?: string | null;
+
+  @Prop({ default: false })
+  twoFactorEnabled!: boolean;
+
+  // Time step of the last accepted code, so a code cannot be used twice.
+  @Prop({ type: Number, default: null })
+  twoFactorLastStep?: number | null;
+
+  @Prop({ type: [String], default: [], select: false })
+  recoveryCodes!: string[];
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
