@@ -41,6 +41,10 @@ jobs:
       - name: Unit tests
         run: docker run --rm blog-test pnpm test
 
+      - name: Dependency audit (reporting only for now)
+        continue-on-error: true
+        run: docker run --rm blog-test pnpm audit --prod --audit-level high
+
       - name: Integration tests (real PostgreSQL, real migrations, fake mail and S3)
         run: |
           docker run -d --name itpg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=blog_it \

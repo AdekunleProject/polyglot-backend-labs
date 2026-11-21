@@ -28,7 +28,11 @@ async function bootstrap() {
 
   configureApp(app);
 
-  if (process.env.ENABLE_DOCS !== 'false') {
+  // Swagger is on for development and off in production unless ENABLE_DOCS=true.
+  const docsEnabled = process.env.ENABLE_DOCS
+    ? process.env.ENABLE_DOCS === 'true'
+    : process.env.NODE_ENV !== 'production';
+  if (docsEnabled) {
     const document = SwaggerModule.createDocument(
       app,
       new DocumentBuilder()

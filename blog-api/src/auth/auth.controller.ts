@@ -29,6 +29,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { GoogleAuthGuard } from './google-auth.guard';
 import { GoogleProfile } from './google.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { ThrottleByEmail } from './email-throttler.guard';
 import { perMinute } from './throttle';
 
 @Controller('auth')
@@ -48,6 +49,7 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(200)
   @Throttle(perMinute(5))
+  @ThrottleByEmail()
   verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto);
   }
@@ -55,12 +57,14 @@ export class AuthController {
   @Post('resend-verification')
   @HttpCode(200)
   @Throttle(perMinute(3))
+  @ThrottleByEmail()
   resendVerification(@Body() dto: ResendVerificationDto) {
     return this.authService.resendVerification(dto.email);
   }
 
   @Post('login')
   @Throttle(perMinute(5))
+  @ThrottleByEmail()
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
@@ -75,6 +79,7 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(200)
   @Throttle(perMinute(3))
+  @ThrottleByEmail()
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
   }
@@ -82,6 +87,7 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(200)
   @Throttle(perMinute(5))
+  @ThrottleByEmail()
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
   }

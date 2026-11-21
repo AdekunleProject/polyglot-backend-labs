@@ -38,7 +38,7 @@ How it holds up:
 - **Codes are single use.** Only a hash is stored, tied to the user and the purpose, so a verification code cannot reset a password.
 - **No account enumeration.** A wrong password, an unknown email and a Google-only account all answer the same 401, and forgot-password never says whether the email exists.
 - **Password rule:** 8 to 72 characters with upper and lower case, a digit and one of `!@#$%^&*`. Hashed with bcrypt (12 rounds).
-- **Limits:** a global limit per client address, and tighter limits on login (5 a minute), verify and reset (5), forgot and resend (3). The health probes are never limited.
+- **Limits:** a global limit per client address, and tighter limits on login (5 a minute), verify and reset (5), forgot and resend (3). Login, verify, resend, forgot and reset are also limited per email address, so spreading guesses over many addresses does not help against one account (the cost: someone can delay a victim for up to a minute). The health probes are never limited.
 - **Deactivating a user** ends their refresh tokens at once. An access token already issued works until it expires (15 minutes by default).
 
 ## Users and roles
@@ -71,7 +71,7 @@ The first admin is created at start from `ADMIN_EMAIL` and `ADMIN_PASSWORD` (12+
 
 ## Configuration
 
-Set in `.env` (see `.env.example`, which explains every variable). The app refuses to start and lists what is missing. Required: the `DB_*` settings, `JWT_SECRET` and `JWT_REFRESH_SECRET` (different, 32+ characters in production). Optional: mail (`MAIL_*`), S3 (`AWS_*`), Google (`GOOGLE_*`), `ADMIN_*`, `FRONTEND_URL`, `TRUST_PROXY`, `THROTTLE_LIMIT`, `ENABLE_DOCS`.
+Set in `.env` (see `.env.example`, which explains every variable). The app refuses to start and lists what is missing. Required: the `DB_*` settings, `JWT_SECRET` and `JWT_REFRESH_SECRET` (different, 32+ characters in production). Optional: mail (`MAIL_*`), S3 (`AWS_*`), Google (`GOOGLE_*`), `ADMIN_*`, `FRONTEND_URL`, `TRUST_PROXY`, `THROTTLE_LIMIT`, `ENABLE_DOCS` (Swagger is on by default and off when `NODE_ENV=production`).
 
 `synchronize` is off. The schema changes only through migrations (`pnpm migration:generate`, `pnpm migration:run`). Real keys belong only in a local `.env` or a Kubernetes Secret, never in Git. On AWS, leave the access keys out and use an IAM role.
 
@@ -93,5 +93,6 @@ The integration tests empty their tables, so they refuse to run unless the datab
 ## Known limitations
 
 - Mail and S3 are written and covered by fakes in the tests, but have not been exercised against a real SMTP server or bucket yet. Google sign-in has not been run against Google.
+- Sign-up answers `409` for an email that already exists, which shows whether an email has an account (login and forgot-password do not). Access tokens stay valid until they expire (15 minutes by default) after a logout or deactivation. Both are common trade-offs.
 - Rate limits are counted in memory per instance. With several replicas a shared store (Redis) is the next step.
 - Not load tested. No in-app notifications (the e-commerce API has them).

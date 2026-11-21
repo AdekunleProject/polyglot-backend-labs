@@ -39,6 +39,23 @@ describe('Rate limiting (integration)', () => {
     expect(blocked.headers['retry-after']).toBeDefined();
   });
 
+  it('limits per email address even when the requests come from different addresses', async () => {
+    // Trust X-Forwarded-For so each request can pretend to be a new client.
+    app.getHttpAdapter().getInstance().set('trust proxy', true);
+    const attempt = (email: string, ip: string) =>
+      request(app.getHttpServer())
+        .post('/auth/login')
+        .set('X-Forwarded-For', ip)
+        .send({ email, password: 'Whatever-1!' });
+
+    for (let i = 1; i <= 5; i++) {
+      expect((await attempt('victim@e2e.test', `10.0.0.${i}`)).status).toBe(401);
+    }
+    expect((await attempt('victim@e2e.test', '10.0.0.99')).status).toBe(429);
+    // Another account from the same address is unaffected.
+    expect((await attempt('other@e2e.test', '10.0.0.99')).status).toBe(401);
+  });
+
   it('never limits the health probes', async () => {
     for (let i = 0; i < 30; i++) {
       expect((await request(app.getHttpServer()).get('/health')).status).toBe(200);
