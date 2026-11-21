@@ -17,6 +17,6 @@ export const normalizeRecoveryCode = (code: string): string =>
   code.replace(/[\s-]/g, '').toUpperCase();
 
 // Bound to the user, so one person's code means nothing for another.
-export function hashRecoveryCode(userId: number, code: string): string {
+export function hashRecoveryCode(userId: number | string, code: string): string {
   return hashToken(`recovery:${userId}:${normalizeRecoveryCode(code)}`);
 }
