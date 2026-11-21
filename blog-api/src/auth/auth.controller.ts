@@ -1,7 +1,16 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors, 
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Req,
+  Res,
   UnauthorizedException,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { VerifyPasswordDto } from './dto/verify-password.dto';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
@@ -18,10 +27,12 @@ import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { VerifyPasswordDto } from './dto/verify-password.dto';
 import { GoogleAuthGuard } from './google-auth.guard';
 import { GoogleProfile } from './google.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ThrottleByEmail } from './email-throttler.guard';
+import { readCookie } from './read-cookie';
 import { perMinute } from './throttle';
 
 @Controller('auth')
@@ -79,6 +90,7 @@ export class AuthController {
   @Post('verify-password')
   @HttpCode(200)
   @Throttle(perMinute(5))
+  @ThrottleByEmail()
   async verifyPassword(
     @Body() dto: VerifyPasswordDto,
     @Res({ passthrough: true }) res: Response,
@@ -104,7 +116,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const resetToken = req.cookies?.password_reset;
+    const resetToken = readCookie(req.headers.cookie, 'password_reset');
     if (!resetToken) {
       throw new UnauthorizedException(
         'Password reset session missing or expired',

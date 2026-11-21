@@ -29,7 +29,8 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
 
     await this.usersRepository.save(
       this.usersRepository.create({
-        name: 'Admin',
+        firstname: 'Admin',
+        lastname: 'Account',
         email,
         password: await bcrypt.hash(password, BCRYPT_SALT_ROUNDS),
         role: Role.ADMIN,

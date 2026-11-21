@@ -1,56 +1,51 @@
-import { IsDateString, IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, Matches, isNotEmpty, MinLength 
+import {
+  IsDateString,
+  IsEmail,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
 } from 'class-validator';
+import { StrongPassword } from '../strong-password.decorator';
 
 export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  @Matches(/^[A-Za-z]+$/, {
-    message: 'Firstname must contain letters only',
-  })
+  @Matches(/^[A-Za-z]+$/, { message: 'firstname must contain letters only' })
   firstname: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, { message: 'middlename must contain letters only' })
+  middlename?: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  @Matches(/^[A-Za-z]+$/, {
-    message: 'lastname must contain letters only',
-  })
+  @Matches(/^[A-Za-z]+$/, { message: 'lastname must contain letters only' })
   lastname: string;
-
-  @IsOptional()
-  @MaxLength(100)
-  @Matches(/^[A-Za-z]+$/, {
-    message: 'middlename must contain letters only',
-  })
-  middlename: string;
 
   @IsEmail()
   @MaxLength(150)
   email: string;
 
-  @IsString()
-  @IsNotEmpty()
-  @MinLength(8)
-  @MaxLength(20)
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).+$/, {
-    message:
-      'Password must contain upper & lower case letters, a number and a special character',
-  })
+  @StrongPassword()
   password: string;
 
-  @IsNotEmpty()
-  @MaxLength(30)
-  phoneNumber?: string;
-
-  @IsNotEmpty()
-  @IsDateString()
-  dateOfBirth?: string;
-
   @IsString()
   @IsNotEmpty()
+  @MaxLength(30)
+  phoneNumber: string;
+
+  @IsDateString()
+  dateOfBirth: string;
+
   @IsIn(['male', 'female', 'other'])
-  gender?: string;
+  gender: string;
 
   @IsString()
   @IsNotEmpty()
@@ -58,5 +53,5 @@ export class RegisterDto {
   @Matches(/^[A-Za-z0-9\s,./-]+$/, {
     message: 'Address can contain letters, numbers, spaces, and , . / - characters',
   })
-  address?: string;
+  address: string;
 }

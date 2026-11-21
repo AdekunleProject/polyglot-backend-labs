@@ -41,7 +41,17 @@ const db = new pg.Client({
 await db.connect();
 
 async function user(name, email) {
-  const created = await call('POST', '/auth/register', { name, email, password: PASSWORD });
+  const [firstname, ...rest] = name.split(' ');
+  const created = await call('POST', '/auth/register', {
+    firstname,
+    lastname: rest.join('') || 'Demo',
+    email,
+    password: PASSWORD,
+    phoneNumber: '08000000000',
+    dateOfBirth: '1995-01-01',
+    gender: 'other',
+    address: '1 Demo Street',
+  });
   console.log(created.ok ? `created user ${email}` : `user ${email} exists`);
   await db.query('UPDATE users SET "isVerified" = true WHERE email = $1', [email]);
   const login = await call('POST', '/auth/login', { email, password: PASSWORD });

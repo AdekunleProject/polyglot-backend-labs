@@ -18,12 +18,12 @@ export class User {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ length: 100 })
-  name: string;
-
-  // Display name: shown as the author of posts and comments.
+  // Shown as the author of posts and comments.
   @Column({ length: 100 })
   firstname: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  middlename: string | null;
 
   @Column({ length: 100 })
   lastname: string;

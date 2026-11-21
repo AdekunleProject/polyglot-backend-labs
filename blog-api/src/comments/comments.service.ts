@@ -44,7 +44,7 @@ export class CommentsService {
     const [items, total] = await this.commentsRepository
       .createQueryBuilder('comment')
       .leftJoin('comment.author', 'author')
-      .addSelect(['author.id', 'author.name'])
+      .addSelect(['author.id', 'author.firstname', 'author.lastname'])
       .where('comment.postId = :postId', { postId })
       .orderBy('comment.createdAt', 'ASC')
       .skip((page - 1) * limit)

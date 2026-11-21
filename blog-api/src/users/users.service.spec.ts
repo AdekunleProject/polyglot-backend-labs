@@ -3,7 +3,7 @@ import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { UsersService } from './users.service';
 
 function build(options: { emailed: boolean; nodeEnv?: string; exists?: boolean }) {
-  const saved = { id: 7, name: 'Ada', email: 'ada@example.com', role: 'user' };
+  const saved = { id: 7, firstname: 'Ada', lastname: 'Okafor', email: 'ada@example.com', role: 'user' };
   const usersRepository = {
     findOneBy: jest.fn().mockResolvedValue(options.exists ? { id: 1 } : null),
     create: jest.fn((value) => value),
@@ -22,7 +22,7 @@ function build(options: { emailed: boolean; nodeEnv?: string; exists?: boolean }
 }
 
 describe('UsersService.createByAdmin', () => {
-  const dto = { name: 'Ada', email: 'ada@example.com' };
+  const dto = { firstname: 'Ada', lastname: 'Okafor', email: 'ada@example.com' };
 
   it('emails the password and keeps it out of the response', async () => {
     const { service, mail } = build({ emailed: true });

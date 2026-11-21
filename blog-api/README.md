@@ -22,14 +22,15 @@ Without a mail server, the verification and reset codes are printed in the API l
 
 | Step | Endpoint | Notes |
 | --- | --- | --- |
-| Sign up | `POST /auth/register` | JSON or multipart with an optional `image`. Emails a 6 character code |
+| Sign up | `POST /auth/register` | JSON or multipart with an optional `image`. Needs `firstname`, `lastname`, `email`, `password`, `phoneNumber`, `dateOfBirth`, `gender` (`male`, `female`, `other`) and `address`; `middlename` is optional. Names are letters only. Emails a 6 character code |
 | Verify | `POST /auth/verify-email` | `{ email, code }`. The code works once and expires in 15 minutes |
 | New code | `POST /auth/resend-verification` | Same answer whether or not the email exists |
 | Sign in | `POST /auth/login` | Returns `accessToken` (15 min), `refreshToken` (7 days) and the user. With 2FA on it returns `{ twoFactorRequired, challengeToken }` instead |
 | 2FA step | `POST /auth/2fa/login` | `{ email, challengeToken, code }`. `code` is the 6 digit authenticator code or a backup code. Returns the tokens |
 | Renew | `POST /auth/refresh` | Returns a new pair. The old refresh token is dead the moment it is used |
 | Forgot password | `POST /auth/forgot-password` | Always the same answer |
-| Reset | `POST /auth/reset-password` | `{ email, code, newPassword, confirmPassword }`. Signs out every device |
+| Check reset code | `POST /auth/verify-password` | `{ email, code }`. The code must belong to that email. Sets a 10 minute `password_reset` cookie (HttpOnly, SameSite strict) |
+| Reset | `POST /auth/reset-password` | `{ newPassword, confirmPassword }` with that cookie. Works once, and signs out every device |
 | Sign out | `POST /auth/logout` | With `{ refreshToken }`: this device. Without: every device |
 | Google | `GET /auth/google` | Only when the three `GOOGLE_*` settings are set |
 
@@ -49,7 +50,7 @@ How it holds up:
 - **Codes are single use.** Only a hash is stored, tied to the user and the purpose, so a verification code cannot reset a password.
 - **No account enumeration.** A wrong password, an unknown email and a Google-only account all answer the same 401, and forgot-password never says whether the email exists.
 - **Password rule:** 8 to 72 characters with upper and lower case, a digit and one of `!@#$%^&*`. Hashed with bcrypt (12 rounds).
-- **Limits:** a global limit per client address, and tighter limits on login (5 a minute), verify and reset (5), forgot and resend (3). Login, verify, resend, forgot and reset are also limited per email address, so spreading guesses over many addresses does not help against one account (the cost: someone can delay a victim for up to a minute). The health probes are never limited.
+- **Limits:** a global limit per client address, and tighter limits on login (5 a minute), verify, check-reset-code and reset (5), forgot and resend (3). Login, verify, resend, forgot and check-reset-code are also limited per email address, so spreading guesses over many addresses does not help against one account (the cost: someone can delay a victim for up to a minute). The health probes are never limited.
 - **Deactivating a user** ends their refresh tokens at once. An access token already issued works until it expires (15 minutes by default).
 
 ## Users and roles

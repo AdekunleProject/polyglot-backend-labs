@@ -6,7 +6,8 @@ import { Profile, Strategy, VerifyCallback } from 'passport-google-oauth20';
 export interface GoogleProfile {
   googleId: string;
   email: string;
-  name: string;
+  firstname: string;
+  lastname: string;
   image?: string;
 }
 
@@ -36,12 +37,11 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     const profileData: GoogleProfile = {
       googleId: profile.id,
       email: email.value,
-      name:
-        profile.displayName ||
-        [profile.name?.givenName, profile.name?.familyName]
-          .filter(Boolean)
-          .join(' ') ||
+      firstname:
+        profile.name?.givenName ||
+        profile.displayName?.split(' ')[0] ||
         email.value.split('@')[0],
+      lastname: profile.name?.familyName || '',
       image: profile.photos?.[0]?.value,
     };
     done(null, profileData);

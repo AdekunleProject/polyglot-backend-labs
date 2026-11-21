@@ -50,7 +50,9 @@ export class UsersService {
   async toPublic(user: User) {
     return {
       id: user.id,
-      name: user.name,
+      firstname: user.firstname,
+      middlename: user.middlename,
+      lastname: user.lastname,
       email: user.email,
       role: user.role,
       phoneNumber: user.phoneNumber,
@@ -109,7 +111,8 @@ export class UsersService {
     const defaultPassword = randomBytes(9).toString('base64url');
     const user = await this.usersRepository.save(
       this.usersRepository.create({
-        name: dto.name,
+        firstname: dto.firstname,
+        lastname: dto.lastname,
         email: dto.email,
         role: dto.role ?? Role.USER,
         password: await bcrypt.hash(defaultPassword, BCRYPT_SALT_ROUNDS),
@@ -121,7 +124,7 @@ export class UsersService {
       user.email,
       'Your account has been created',
       [
-        `Hello ${user.name},`,
+        `Hello ${user.firstname},`,
         '',
         'An account was created for you.',
         `Email: ${user.email}`,

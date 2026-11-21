@@ -147,35 +147,14 @@ export class AuthService {
   // Creates, stores (hashed) and emails a code. Any older code for the same
   // purpose stops working.
   private async sendCode(user: User, purpose: MailTokenPurpose) {
+    const code = generateVerificationCode();
     await this.mailTokensRepository.delete({ userId: user.id, purpose });
-
-    let code: string;
-    let tokenHash: string;
-
-    do {
-      code = generateVerificationCode();
-      tokenHash =
-        purpose === MailTokenPurpose.RESET_PASSWORD
-          ? hashCode(0, purpose, code)
-          : hashCode(user.id, purpose, code);
-    } while (
-      purpose === MailTokenPurpose.RESET_PASSWORD &&
-      (await this.mailTokensRepository.findOne({
-        where: {
-          purpose,
-          tokenHash,
-          expiryDate: MoreThan(new Date()),
-        },
-      }))
-    );
-
     await this.mailTokensRepository.insert({
       userId: user.id,
       purpose,
-      tokenHash,
+      tokenHash: hashCode(user.id, purpose, code),
       expiryDate: new Date(Date.now() + CODE_TTL_MINUTES * 60_000),
     });
-
     const [subject, text] =
       purpose === MailTokenPurpose.VERIFY_EMAIL
         ? [
@@ -186,30 +165,8 @@ export class AuthService {
             'Reset your password',
             `Your password reset code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
           ];
-
     await this.mailService.sendEmail(user.email, subject, text);
   }
-  // private async sendCode(user: User, purpose: MailTokenPurpose) {
-  //   const code = generateVerificationCode();
-  //   await this.mailTokensRepository.delete({ userId: user.id, purpose });
-  //   await this.mailTokensRepository.insert({
-  //     userId: user.id,
-  //     purpose,
-  //     tokenHash: hashCode(user.id, purpose, code),
-  //     expiryDate: new Date(Date.now() + CODE_TTL_MINUTES * 60_000),
-  //   });
-  //   const [subject, text] =
-  //     purpose === MailTokenPurpose.VERIFY_EMAIL
-  //       ? [
-  //           'Verify your email',
-  //           `Your verification code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
-  //         ]
-  //       : [
-  //           'Reset your password',
-  //           `Your password reset code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
-  //         ];
-  //   await this.mailService.sendEmail(user.email, subject, text);
-  // }
 
   // Deleting is the check: it succeeds for exactly one request, so a code
   // works once even if two requests race.
@@ -238,13 +195,14 @@ export class AuthService {
     const user = await this.usersRepository.save(
       this.usersRepository.create({
         firstname: dto.firstname,
+        middlename: dto.middlename ?? null,
         lastname: dto.lastname,
         email: dto.email,
         password: await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS),
-        phoneNumber: dto.phoneNumber ?? null,
-        dateOfBirth: dto.dateOfBirth ?? null,
-        gender: dto.gender ?? null,
-        address: dto.address ?? null,
+        phoneNumber: dto.phoneNumber,
+        dateOfBirth: dto.dateOfBirth,
+        gender: dto.gender,
+        address: dto.address,
         profileImage,
         profileImageProvider: profileImage ? ProfileImageProvider.S3 : null,
         provider: AuthProvider.LOCAL,
@@ -334,8 +292,8 @@ export class AuthService {
     if (!user) {
       user = await this.usersRepository.save(
         this.usersRepository.create({
-          firstname: profile.name,
-          lastname: profile.name,
+          firstname: profile.firstname,
+          lastname: profile.lastname,
           email: profile.email,
           googleId: profile.googleId,
           provider: AuthProvider.GOOGLE,
@@ -409,101 +367,87 @@ export class AuthService {
     };
   }
 
+  // Not the access-token secret, so a reset session can never pass as a login.
+  private get resetSecret(): string {
+    return `${this.config.getOrThrow<string>('JWT_SECRET')}:password-reset`;
+  }
+
+  // Changes whenever the password does, so a reset session works only once.
+  private passwordVersion(passwordHash: string | null): string {
+    return hashToken(passwordHash ?? '').slice(0, 16);
+  }
+
+  private findWithPassword(where: { email: string } | { id: number }) {
+    const query = this.usersRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password');
+    return 'email' in where
+      ? query.where('user.email = :email', where).getOne()
+      : query.where('user.id = :id', where).getOne();
+  }
+
+  // Step 2 of a reset: the emailed code, together with the email it was sent
+  // to, is exchanged for a 10 minute reset session.
   async verifyPasswordResetOtp(dto: VerifyPasswordDto) {
-    const tokenHash = hashCode(
-      0,
-      MailTokenPurpose.RESET_PASSWORD,
-      dto.code,
-    );
-    const mailToken = await this.mailTokensRepository.findOne({
-      where: {
-        purpose: MailTokenPurpose.RESET_PASSWORD,
-        tokenHash,
-        expiryDate: MoreThan(new Date()),
-      },
-    });
-    if (!mailToken) {
-      throw new BadRequestException(INVALID_CODE);
-    }
-    const consumed = await this.mailTokensRepository.delete({
-      id: mailToken.id,
-      purpose: MailTokenPurpose.RESET_PASSWORD,
-      tokenHash,
-      expiryDate: MoreThan(new Date()),
-    });
-    if (consumed.affected !== 1) {
+    const user = await this.findWithPassword({ email: dto.email });
+    if (
+      !user ||
+      !user.isActive ||
+      !(await this.consumeCode(user.id, MailTokenPurpose.RESET_PASSWORD, dto.code))
+    ) {
       throw new BadRequestException(INVALID_CODE);
     }
     const resetToken = await this.jwtService.signAsync(
       {
-        sub: mailToken.userId,
+        sub: user.id,
         type: 'password_reset',
+        pv: this.passwordVersion(user.password),
       },
-      {
-        secret: this.config.getOrThrow<string>('JWT_SECRET'),
-        expiresIn: '10m',
-      },
+      { secret: this.resetSecret, expiresIn: '10m' },
     );
     return {
-      message: 'Password reset OTP verified successfully',
+      message: 'Password reset code verified. Now set a new password.',
       resetToken,
     };
   }
 
+  // Step 3: the new password, with the reset session from step 2.
   async resetPassword(dto: ResetPasswordDto, resetToken: string) {
+    // Checked first, so a typo does not cost the person their reset session.
     if (dto.newPassword !== dto.confirmPassword) {
       throw new BadRequestException("Passwords don't match");
     }
-    let payload: { sub: number; type: string };
+    const invalid = new UnauthorizedException(
+      'Invalid or expired password reset session',
+    );
+    let payload: { sub?: number; type?: string; pv?: string };
     try {
       payload = await this.jwtService.verifyAsync(resetToken, {
-        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+        secret: this.resetSecret,
       });
     } catch {
-      throw new UnauthorizedException('Invalid or expired password reset session');
+      throw invalid;
     }
+    if (typeof payload.sub !== 'number' || payload.type !== 'password_reset') {
+      throw invalid;
+    }
+    const user = await this.findWithPassword({ id: payload.sub });
     if (
-      typeof payload.sub !== 'number' ||
-      payload.type !== 'password_reset'
+      !user ||
+      !user.isActive ||
+      payload.pv !== this.passwordVersion(user.password)
     ) {
-      throw new UnauthorizedException('Invalid password reset session');
-    }
-    const user = await this.usersRepository.findOneBy({
-      id: payload.sub,
-      isActive: true,
-    });
-    if (!user) {
-      throw new UnauthorizedException('Invalid password reset session');
+      throw invalid;
     }
     await this.usersRepository.update(user.id, {
       password: await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS),
+      // The code came from the inbox, which proves the address is theirs.
       isVerified: true,
     });
+    // A new password signs the account out everywhere.
     await this.sessionsRepository.delete({ userId: user.id });
     return { message: 'Password reset successfully' };
   }
-
-  // async resetPassword(dto: ResetPasswordDto) {
-  //   // Checked before the code is used up, so a typo does not burn the code.
-  //   if (dto.newPassword !== dto.confirmPassword) {
-  //     throw new BadRequestException("Passwords don't match");
-  //   }
-  //   const user = await this.usersRepository.findOneBy({ email: dto.email });
-  //   if (
-  //     !user ||
-  //     !(await this.consumeCode(user.id, MailTokenPurpose.RESET_PASSWORD, dto.code))
-  //   ) {
-  //     throw new BadRequestException(INVALID_CODE);
-  //   }
-  //   await this.usersRepository.update(user.id, {
-  //     password: await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS),
-  //     // The code came from the inbox, which proves the address is theirs.
-  //     isVerified: true,
-  //   });
-  //   // A new password signs the account out everywhere.
-  //   await this.sessionsRepository.delete({ userId: user.id });
-  //   return { message: 'Password reset successfully' };
-  // }
 
   async logout(userId: number, refreshToken?: string) {
     if (refreshToken) {

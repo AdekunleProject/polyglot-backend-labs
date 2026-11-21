@@ -58,7 +58,7 @@ export class PostsService {
     const qb = this.postsRepository
       .createQueryBuilder('post')
       .leftJoin('post.author', 'author')
-      .addSelect(['author.id', 'author.name'])
+      .addSelect(['author.id', 'author.firstname', 'author.lastname'])
       .leftJoinAndSelect('post.tags', 'tag')
       .where('post.published = true');
 
@@ -98,7 +98,7 @@ export class PostsService {
     const post = await this.postsRepository
       .createQueryBuilder('post')
       .leftJoin('post.author', 'author')
-      .addSelect(['author.id', 'author.name'])
+      .addSelect(['author.id', 'author.firstname', 'author.lastname'])
       .leftJoinAndSelect('post.tags', 'tag')
       .where('post.slug = :slug AND post.published = true', { slug })
       .getOne();

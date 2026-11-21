@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
 
@@ -12,7 +13,22 @@ export class UpdateProfileDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  name?: string;
+  @Matches(/^[A-Za-z]+$/, { message: 'firstname must contain letters only' })
+  firstname?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, { message: 'middlename must contain letters only' })
+  middlename?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, { message: 'lastname must contain letters only' })
+  lastname?: string;
 
   @IsOptional()
   @IsString()

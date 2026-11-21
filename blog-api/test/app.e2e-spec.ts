@@ -83,8 +83,21 @@ describe('Blog API (integration)', () => {
   const nextEmail = (prefix = 'user') =>
     `${prefix}${(counter += 1)}-${Date.now()}@e2e.test`;
 
+  // Every field sign-up asks for. `firstname` is the one tests vary.
+  const registerBody = (email: string, firstname = 'Tester', extra: Record<string, unknown> = {}) => ({
+    firstname,
+    lastname: 'User',
+    email,
+    password: PASSWORD,
+    phoneNumber: '08000000000',
+    dateOfBirth: '1995-01-01',
+    gender: 'female',
+    address: '1 Test Street',
+    ...extra,
+  });
+
   async function register(email = nextEmail(), name = 'Tester') {
-    const res = await http().post('/auth/register').send({ name, email, password: PASSWORD });
+    const res = await http().post('/auth/register').send(registerBody(email, name));
     expect(res.status).toBe(201);
     return email;
   }
@@ -159,30 +172,30 @@ describe('Blog API (integration)', () => {
   describe('registration and email verification', () => {
     it('registers without returning the password, and rejects a duplicate email', async () => {
       const email = nextEmail('dup');
-      const first = await http().post('/auth/register').send({ name: 'A', email, password: PASSWORD });
+      const first = await http().post('/auth/register').send(registerBody(email, 'A'));
       expect(first.status).toBe(201);
       expect(JSON.stringify(first.body)).not.toContain(PASSWORD);
       expect(first.body.user).not.toHaveProperty('password');
       expect(first.body.user.isVerified).toBe(false);
 
-      const second = await http().post('/auth/register').send({ name: 'B', email, password: PASSWORD });
+      const second = await http().post('/auth/register').send(registerBody(email, 'B'));
       expect(second.status).toBe(409);
     });
 
     it('rejects a weak password and refuses to let a client pick its own role', async () => {
       const weak = await http()
         .post('/auth/register')
-        .send({ name: 'W', email: nextEmail('weak'), password: 'short' });
+        .send(registerBody(nextEmail('weak'), 'W', { password: 'short' }));
       expect(weak.status).toBe(400);
 
       const noSpecial = await http()
         .post('/auth/register')
-        .send({ name: 'W', email: nextEmail('weak'), password: 'Password1234' });
+        .send(registerBody(nextEmail('weak'), 'W', { password: 'Password1234' }));
       expect(noSpecial.status).toBe(400);
 
       const escalate = await http()
         .post('/auth/register')
-        .send({ name: 'E', email: nextEmail('esc'), password: PASSWORD, role: 'admin' });
+        .send(registerBody(nextEmail('esc'), 'E', { role: 'admin' }));
       expect(escalate.status).toBe(400);
     });
 
@@ -229,18 +242,28 @@ describe('Blog API (integration)', () => {
       const email = nextEmail('img');
       const res = await http()
         .post('/auth/register')
-        .field('name', 'Pic')
+        .field('firstname', 'Pic')
+        .field('lastname', 'User')
         .field('email', email)
         .field('password', PASSWORD)
+        .field('phoneNumber', '08000000000')
+        .field('dateOfBirth', '1995-01-01')
+        .field('gender', 'female')
+        .field('address', '1 Test Street')
         .attach('image', Buffer.from('not-really-a-png'), { filename: 'me.png', contentType: 'image/png' });
       expect(res.status).toBe(201);
       expect(res.body.user.profileImage).toMatch(/^https:\/\/files\.test\/users\/fake-/);
 
       const bad = await http()
         .post('/auth/register')
-        .field('name', 'Pic')
+        .field('firstname', 'Pic')
+        .field('lastname', 'User')
         .field('email', nextEmail('img'))
         .field('password', PASSWORD)
+        .field('phoneNumber', '08000000000')
+        .field('dateOfBirth', '1995-01-01')
+        .field('gender', 'female')
+        .field('address', '1 Test Street')
         .attach('image', Buffer.from('hello'), { filename: 'a.txt', contentType: 'text/plain' });
       expect(bad.status).toBe(400);
     });
@@ -307,37 +330,67 @@ describe('Blog API (integration)', () => {
       expect(a.body).toEqual(b.body);
     });
 
-    it('resets with the emailed code once, and signs every device out', async () => {
+    // Reset is three steps: forgot-password emails a code, verify-password
+    // swaps email + code for a short cookie, reset-password sets the password.
+    async function verifyResetCode(email: string, code = mail.lastCode(email)) {
+      const res = await http().post('/auth/verify-password').send({ email, code });
+      expect(res.status).toBe(200);
+      const cookies = res.headers['set-cookie'] as unknown as string[];
+      expect(cookies.join(';')).toMatch(/password_reset=.+HttpOnly/);
+      return cookies.map((c) => c.split(';')[0]).join('; ');
+    }
+
+    it('resets in three steps, once, and signs every device out', async () => {
       const user = await signUp();
       await http().post('/auth/forgot-password').send({ email: user.email });
-      const code = mail.lastCode(user.email);
+      const cookie = await verifyResetCode(user.email);
 
       const mismatch = await http()
         .post('/auth/reset-password')
-        .send({ email: user.email, code, newPassword: NEW_PASSWORD, confirmPassword: 'Different-1!' });
+        .set('Cookie', cookie)
+        .send({ newPassword: NEW_PASSWORD, confirmPassword: 'Different-1!' });
       expect(mismatch.status).toBe(400);
 
-      // A typo did not burn the code.
+      // A typo did not end the reset session.
       const reset = await http()
         .post('/auth/reset-password')
-        .send({ email: user.email, code, newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+        .set('Cookie', cookie)
+        .send({ newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
       expect(reset.status).toBe(200);
+      // The session works once: the password changed, so it no longer matches.
       const again = await http()
         .post('/auth/reset-password')
-        .send({ email: user.email, code, newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
-      expect(again.status).toBe(400);
+        .set('Cookie', cookie)
+        .send({ newPassword: 'Another-Passw0rd!', confirmPassword: 'Another-Passw0rd!' });
+      expect(again.status).toBe(401);
 
       expect((await http().post('/auth/login').send({ email: user.email, password: PASSWORD })).status).toBe(401);
       expect((await login(user.email, NEW_PASSWORD)).accessToken).toBeTruthy();
       expect((await http().post('/auth/refresh').send({ refreshToken: user.refreshToken })).status).toBe(401);
     });
 
+    it('needs the reset session, and the code must belong to that email', async () => {
+      const noCookie = await http()
+        .post('/auth/reset-password')
+        .send({ newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+      expect(noCookie.status).toBe(401);
+
+      const a = await signUp();
+      const b = await signUp();
+      await http().post('/auth/forgot-password').send({ email: a.email });
+      const codeForA = mail.lastCode(a.email);
+      // A's code is no good for B's address, and the answer does not say why.
+      const wrongOwner = await http().post('/auth/verify-password').send({ email: b.email, code: codeForA });
+      expect(wrongOwner.status).toBe(400);
+      const unknown = await http().post('/auth/verify-password').send({ email: nextEmail('ghost'), code: codeForA });
+      expect(unknown.status).toBe(400);
+      expect(unknown.body.message).toBe(wrongOwner.body.message);
+    });
+
     it('does not let a verification code reset a password', async () => {
       const email = await register();
       const verifyCode = mail.lastCode(email);
-      const res = await http()
-        .post('/auth/reset-password')
-        .send({ email, code: verifyCode, newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+      const res = await http().post('/auth/verify-password').send({ email, code: verifyCode });
       expect(res.status).toBe(400);
     });
   });
@@ -347,15 +400,15 @@ describe('Blog API (integration)', () => {
       const user = await signUp('Before');
       const me = await http().get('/users/me').set(bearer(user.accessToken));
       expect(me.status).toBe(200);
-      expect(me.body.name).toBe('Before');
+      expect(me.body.firstname).toBe('Before');
       expect(me.body).not.toHaveProperty('password');
 
       const updated = await http()
         .patch('/users/me')
         .set(bearer(user.accessToken))
-        .send({ name: 'After', bio: 'Writes about databases' });
+        .send({ firstname: 'After', bio: 'Writes about databases' });
       expect(updated.status).toBe(200);
-      expect(updated.body.user.name).toBe('After');
+      expect(updated.body.user.firstname).toBe('After');
       expect(updated.body.user.bio).toBe('Writes about databases');
       // Fields that were not sent are untouched.
       expect(updated.body.user.email).toBe(user.email);
@@ -387,7 +440,7 @@ describe('Blog API (integration)', () => {
       const created = await http()
         .post('/users')
         .set(bearer(admin.accessToken))
-        .send({ name: 'Made By Admin', email });
+        .send({ firstname: 'Made', lastname: 'ByAdmin', email });
       expect(created.status).toBe(201);
       // The password goes to the new user's inbox, never into the response.
       expect(created.body.defaultPassword).toBeUndefined();
@@ -419,7 +472,7 @@ describe('Blog API (integration)', () => {
         const created = await http()
           .post('/users')
           .set(bearer(admin.accessToken))
-          .send({ name: 'No Mail', email: nextEmail('nomail') });
+          .send({ firstname: 'No', lastname: 'Mail', email: nextEmail('nomail') });
         expect(created.status).toBe(201);
         expect(created.body.defaultPassword).toBeTruthy();
       } finally {
