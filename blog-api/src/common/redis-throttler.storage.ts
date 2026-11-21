@@ -1,9 +1,5 @@
 import { Logger } from '@nestjs/common';
-import {
-  ThrottlerStorage,
-  ThrottlerStorageService,
-  type ThrottlerStorageRecord,
-} from '@nestjs/throttler';
+import { ThrottlerStorageService } from '@nestjs/throttler';
 import type { Redis } from 'ioredis';
 
 // One round trip, and atomic, so replicas never miscount. KEYS[1] counts hits,
@@ -25,6 +21,14 @@ end
 return {hits, ttl, 0, 0}
 `;
 
+// Same shape as the record @nestjs/throttler expects (it does not export the type).
+interface ThrottlerRecord {
+  totalHits: number;
+  timeToExpire: number;
+  isBlocked: boolean;
+  timeToBlockExpire: number;
+}
+
 const seconds = (ms: number) => Math.max(0, Math.ceil(ms / 1000));
 
 /**
@@ -35,7 +39,7 @@ const seconds = (ms: number) => Math.max(0, Math.ceil(ms / 1000));
  * If Redis cannot be reached the limiter falls back to in-memory counting on
  * that instance, rather than rejecting everybody or turning limits off.
  */
-export class RedisThrottlerStorage implements ThrottlerStorage {
+export class RedisThrottlerStorage {
   private readonly logger = new Logger(RedisThrottlerStorage.name);
   private fallback?: ThrottlerStorageService;
   private lastWarning = 0;
@@ -48,7 +52,7 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
     limit: number,
     blockDuration: number,
     throttlerName: string,
-  ): Promise<ThrottlerStorageRecord> {
+  ): Promise<ThrottlerRecord> {
     const base = `throttle:{${throttlerName}:${key}}`;
     try {
       const reply = (await this.client.eval(
