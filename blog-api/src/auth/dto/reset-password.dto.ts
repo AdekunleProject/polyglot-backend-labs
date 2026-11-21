@@ -1,15 +1,13 @@
-import { IsEmail, IsNotEmpty, IsString, Length } from 'class-validator';
-import { StrongPassword } from '../strong-password.decorator';
+import { IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class ResetPasswordDto {
-  @IsEmail()
-  email: string;
-
   @IsString()
-  @Length(6, 6)
-  code: string;
-
-  @StrongPassword()
+  @MinLength(8)
+  @MaxLength(20)
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).+$/, {
+    message:
+      'Password must contain upper & lower case letters, a number and a special character',
+  })
   newPassword: string;
 
   @IsString()

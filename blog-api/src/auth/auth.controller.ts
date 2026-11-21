@@ -1,15 +1,7 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Post,
-  Req,
-  Res,
-  UploadedFile,
-  UseGuards,
-  UseInterceptors,
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors, 
+  UnauthorizedException,
 } from '@nestjs/common';
+import { VerifyPasswordDto } from './dto/verify-password.dto';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
@@ -84,12 +76,48 @@ export class AuthController {
     return this.authService.forgotPassword(dto);
   }
 
+  @Post('verify-password')
+  @HttpCode(200)
+  @Throttle(perMinute(5))
+  async verifyPassword(
+    @Body() dto: VerifyPasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.verifyPasswordResetOtp(dto);
+    res.cookie('password_reset', result.resetToken, {
+      httpOnly: true,
+      secure: this.config.get<string>('NODE_ENV') === 'production',
+      sameSite: 'strict',
+      maxAge: 10 * 60 * 1000,
+      path: '/auth',
+    });
+    return {
+      message: result.message,
+    };
+  }
+
   @Post('reset-password')
   @HttpCode(200)
   @Throttle(perMinute(5))
-  @ThrottleByEmail()
-  resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.authService.resetPassword(dto);
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const resetToken = req.cookies?.password_reset;
+    if (!resetToken) {
+      throw new UnauthorizedException(
+        'Password reset session missing or expired',
+      );
+    }
+    const result = await this.authService.resetPassword(dto, resetToken);
+    res.clearCookie('password_reset', {
+      httpOnly: true,
+      secure: this.config.get<string>('NODE_ENV') === 'production',
+      sameSite: 'strict',
+      path: '/auth',
+    });
+    return result;
   }
 
   @Post('logout')

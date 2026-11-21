@@ -1,42 +1,62 @@
-import {
-  IsDateString,
-  IsEmail,
-  IsIn,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  MaxLength,
+import { IsDateString, IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, Matches, isNotEmpty, MinLength 
 } from 'class-validator';
-import { StrongPassword } from '../strong-password.decorator';
 
 export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  name: string;
+  @Matches(/^[A-Za-z]+$/, {
+    message: 'Firstname must contain letters only',
+  })
+  firstname: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, {
+    message: 'lastname must contain letters only',
+  })
+  lastname: string;
+
+  @IsOptional()
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, {
+    message: 'middlename must contain letters only',
+  })
+  middlename: string;
 
   @IsEmail()
   @MaxLength(150)
   email: string;
 
-  @StrongPassword()
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(8)
+  @MaxLength(20)
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).+$/, {
+    message:
+      'Password must contain upper & lower case letters, a number and a special character',
+  })
   password: string;
 
-  @IsOptional()
-  @IsString()
+  @IsNotEmpty()
   @MaxLength(30)
   phoneNumber?: string;
 
-  @IsOptional()
+  @IsNotEmpty()
   @IsDateString()
   dateOfBirth?: string;
 
-  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
   @IsIn(['male', 'female', 'other'])
   gender?: string;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(255)
+  @Matches(/^[A-Za-z0-9\s,./-]+$/, {
+    message: 'Address can contain letters, numbers, spaces, and , . / - characters',
+  })
   address?: string;
 }
