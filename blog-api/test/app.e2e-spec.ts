@@ -492,7 +492,7 @@ describe('Blog API (integration)', () => {
       hotp(base32Decode(secret), timeStep() + offset);
 
     it('walks through setup, sign-in with a code, a backup code, and turning it off', async () => {
-      const user = await signUp('Two Factor');
+      const user = await signUp('TwoFactor');
 
       const setup = await http().post('/auth/2fa/setup').set(bearer(user.accessToken));
       expect(setup.status).toBe(200);
