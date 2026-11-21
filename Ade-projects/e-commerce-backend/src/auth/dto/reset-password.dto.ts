@@ -1,21 +1,12 @@
 import {
-  IsEmail,
   IsString,
   IsNotEmpty,
-  Length,
   MinLength,
   MaxLength,
   Matches,
 } from 'class-validator';
 
 export class ResetPasswordDto {
-  @IsEmail()
-  readonly email!: string;
-
-  @IsString()
-  @Length(6, 6)
-  readonly code!: string;
-
   @IsString()
   @MinLength(8)
   @MaxLength(20)

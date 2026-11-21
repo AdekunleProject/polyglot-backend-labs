@@ -11,6 +11,7 @@ import * as crypto from 'crypto';
 import { SignupDto } from '../auth/dto/signup.dto';
 import { LoginDto } from '../auth/dto/login.dto';
 import { ResetPasswordDto } from '../auth/dto/reset-password.dto';
+import { VerifyPasswordDto } from './dto/verify-password.dto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { MailService } from '../helpers/mail/mail-service';
@@ -192,6 +193,7 @@ export class AuthService {
       );
       const user = new this.userModel({
         firstname: signupDto.firstname,
+        middlename: signupDto.middlename,
         lastname: signupDto.lastname,
         address: signupDto.address,
         email: signupDto.email,
@@ -482,25 +484,69 @@ export class AuthService {
     };
   }
 
-  async resetPassword(
-    email: string,
-    code: string,
-    resetPasswordDto: ResetPasswordDto,
-  ) {
-    const { newPassword, confirmPassword } = resetPasswordDto;
-    // Checked before the code is used up, so a typo does not burn it.
-    if (newPassword !== confirmPassword) {
-      throw new BadRequestException('Passwords do not match');
-    }
-    const user = await this.userModel.findOne({ email });
+  private get resetSecret(): string {
+    return `${this.configService.getOrThrow<string>('JWT_SECRET')}:password-reset`;
+  }
+
+  // Changes whenever the password does, so a reset session works only once.
+  private passwordVersion(passwordHash: string | undefined): string {
+    return hashToken(passwordHash ?? '').slice(0, 16);
+  }
+
+  // Step 2 of a reset: the emailed code, together with the email it was sent
+  // to, is exchanged for a 10 minute reset session.
+  async verifyPasswordResetOtp(dto: VerifyPasswordDto) {
+    const user = await this.userModel
+      .findOne({ email: dto.email })
+      .select('+password');
     if (
       !user ||
-      !(await this.consumeCode(user, MailTokenPurpose.RESET_PASSWORD, code))
+      !(await this.consumeCode(user, MailTokenPurpose.RESET_PASSWORD, dto.code))
     ) {
       throw new BadRequestException('Invalid or expired code');
     }
-    user.password = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-    // They proved they own the mailbox, so a pending verification is moot.
+    const resetToken = await this.jwtService.signAsync(
+      {
+        sub: user._id.toString(),
+        type: 'password_reset',
+        pv: this.passwordVersion(user.password),
+      },
+      { secret: this.resetSecret, expiresIn: '10m' },
+    );
+    return {
+      message: 'Password reset code verified. Now set a new password.',
+      resetToken,
+    };
+  }
+
+  // Step 3: the new password, with the reset session from step 2.
+  async resetPassword(dto: ResetPasswordDto, resetToken: string) {
+    // Checked first, so a typo does not cost the person their reset session.
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
+    }
+    const invalid = new UnauthorizedException(
+      'Invalid or expired password reset session',
+    );
+    let payload: { sub?: string; type?: string; pv?: string };
+    try {
+      payload = await this.jwtService.verifyAsync(resetToken, {
+        secret: this.resetSecret,
+      });
+    } catch {
+      throw invalid;
+    }
+    if (typeof payload.sub !== 'string' || payload.type !== 'password_reset') {
+      throw invalid;
+    }
+    const user = await this.userModel
+      .findById(payload.sub)
+      .select('+password');
+    if (!user || payload.pv !== this.passwordVersion(user.password)) {
+      throw invalid;
+    }
+    user.password = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+    // The code came from the inbox, which proves the address is theirs.
     user.isVerified = true;
     await user.save();
     // A new password signs the account out everywhere.

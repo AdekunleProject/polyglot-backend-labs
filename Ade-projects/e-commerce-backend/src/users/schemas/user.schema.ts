@@ -37,6 +37,8 @@ export class User extends Document {
   @Factory((faker) => faker!.person.firstName())
   @Prop({ required: true })
   firstname!: string;
+  @Prop({ required: false })
+  middlename?: string;
   @Factory((faker) => faker!.person.lastName())
   @Prop({ required: true })
   lastname!: string;

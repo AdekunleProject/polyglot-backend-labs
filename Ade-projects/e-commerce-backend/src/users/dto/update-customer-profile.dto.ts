@@ -4,6 +4,8 @@ import {
   IsEmail,
   IsPhoneNumber,
   IsDateString,
+  Matches,
+  MaxLength,
 } from 'class-validator';
 
 // CRITICAL BUG FIX: this declared `firstName`/`lastName` (camelCase), but
@@ -24,6 +26,12 @@ export class UpdateCustomerProfileDto {
   @IsString()
   @IsOptional()
   firstname?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, { message: 'middlename must contain letters only' })
+  middlename?: string;
 
   @IsString()
   @IsOptional()

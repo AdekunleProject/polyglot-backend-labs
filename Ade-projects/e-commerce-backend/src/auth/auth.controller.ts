@@ -8,9 +8,13 @@ import {
   UploadedFile,
   Req,
   Res,
+  HttpCode,
+  UnauthorizedException,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import { VerifyPasswordDto } from './dto/verify-password.dto';
+import { readCookie } from './read-cookie';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -105,13 +109,45 @@ export class AuthController {
 
   @Throttle(perMinute(5))
   @ThrottleByEmail()
+  @Post('verify-password')
+  @HttpCode(200)
+  async verifyPassword(
+    @Body() dto: VerifyPasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.verifyPasswordResetOtp(dto);
+    res.cookie('password_reset', result.resetToken, {
+      httpOnly: true,
+      secure: this.configService.get<string>('NODE_ENV') === 'production',
+      sameSite: 'strict',
+      maxAge: 10 * 60 * 1000,
+      path: '/auth',
+    });
+    return { message: result.message };
+  }
+
+  @Throttle(perMinute(5))
   @Post('reset-password')
-  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
-    return this.authService.resetPassword(
-      resetPasswordDto.email,
-      resetPasswordDto.code,
-      resetPasswordDto,
-    );
+  @HttpCode(200)
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const resetToken = readCookie(req.headers.cookie, 'password_reset');
+    if (!resetToken) {
+      throw new UnauthorizedException(
+        'Password reset session missing or expired',
+      );
+    }
+    const result = await this.authService.resetPassword(dto, resetToken);
+    res.clearCookie('password_reset', {
+      httpOnly: true,
+      secure: this.configService.get<string>('NODE_ENV') === 'production',
+      sameSite: 'strict',
+      path: '/auth',
+    });
+    return result;
   }
 
   @Post('logout')

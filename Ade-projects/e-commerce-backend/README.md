@@ -146,7 +146,7 @@ Full, interactive documentation is in Swagger at `/docs`. Main route groups:
 
 | Prefix | Purpose |
 | --- | --- |
-| `/auth` | `signup`, `verify-email`, `resend-verification`, `login`, `refresh`, `logout`, `me`, `forgot-password`, `reset-password`, `google`, and `2fa/setup`, `2fa/enable`, `2fa/disable`, `2fa/login` |
+| `/auth` | `signup`, `verify-email`, `resend-verification`, `login`, `refresh`, `logout`, `me`, `forgot-password`, `verify-password`, `reset-password`, `google`, and `2fa/setup`, `2fa/enable`, `2fa/disable`, `2fa/login` |
 | `/users` | List users (admin), create users |
 | `/products`, `/variants` | Products, variants and stock updates |
 | `/brands`, `/categories` | Catalogue organisation |

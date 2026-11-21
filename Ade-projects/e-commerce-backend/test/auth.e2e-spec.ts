@@ -186,38 +186,71 @@ describe('Authentication (integration)', () => {
   });
 
   describe('password reset', () => {
-    it('keeps the code for a typo, works once, and signs in with the new password', async () => {
-      const { email } = await newCustomer();
+    // Step 2 then step 3. The cookie from step 2 is what step 3 needs.
+    const startReset = async (email: string) => {
       await http().post('/auth/forgot-password').send({ email });
-      const code = mail.lastCode(email);
+      return mail.lastCode(email);
+    };
+    const cookieOf = (res: request.Response) =>
+      ((res.headers['set-cookie'] as unknown as string[]) ?? [])
+        .map((c) => c.split(';')[0])
+        .find((c) => c.startsWith('password_reset='));
+
+    it('checks the code, sets a cookie, resets once, and signs in with the new password', async () => {
+      const { email } = await newCustomer();
+      const code = await startReset(email);
       const newPassword = 'Brand-New-Passw0rd!';
+
+      const verified = await http().post('/auth/verify-password').send({ email, code });
+      expect(verified.status).toBe(200);
+      expect(verified.body.resetToken).toBeUndefined();
+      const cookie = cookieOf(verified)!;
+      expect(cookie).toBeDefined();
+      expect(String(verified.headers['set-cookie'])).toMatch(/HttpOnly/i);
 
       const typo = await http()
         .post('/auth/reset-password')
-        .send({ email, code, newPassword, confirmPassword: 'Different-Passw0rd!' });
+        .set('Cookie', cookie)
+        .send({ newPassword, confirmPassword: 'Different-Passw0rd!' });
       expect(typo.status).toBe(400);
 
       const done = await http()
         .post('/auth/reset-password')
-        .send({ email, code, newPassword, confirmPassword: newPassword });
-      expect(done.status).toBe(201);
+        .set('Cookie', cookie)
+        .send({ newPassword, confirmPassword: newPassword });
+      expect(done.status).toBe(200);
+
       const again = await http()
         .post('/auth/reset-password')
-        .send({ email, code, newPassword, confirmPassword: newPassword });
-      expect(again.status).toBe(400);
+        .set('Cookie', cookie)
+        .send({ newPassword: 'Another-Passw0rd!', confirmPassword: 'Another-Passw0rd!' });
+      expect(again.status).toBe(401);
 
       expect((await login(email)).status).toBe(401);
       expect((await login(email, newPassword)).status).toBe(201);
+    });
+
+    it('rejects a reset without the cookie, and a code used for another email', async () => {
+      const a = await newCustomer();
+      const b = await newCustomer();
+      const code = await startReset(a.email);
+      const none = await http()
+        .post('/auth/reset-password')
+        .send({ newPassword: 'Brand-New-Passw0rd!', confirmPassword: 'Brand-New-Passw0rd!' });
+      expect(none.status).toBe(401);
+      const wrongEmail = await http()
+        .post('/auth/verify-password')
+        .send({ email: b.email, code });
+      expect(wrongEmail.status).toBe(400);
     });
 
     it('does not accept an email-verification code as a reset code, or the reverse', async () => {
       const email = nextEmail('purpose');
       await http().post('/auth/signup').send(signupBody(email));
       const verifyCode = mail.lastCode(email);
-      const newPassword = 'Brand-New-Passw0rd!';
       const reset = await http()
-        .post('/auth/reset-password')
-        .send({ email, code: verifyCode, newPassword, confirmPassword: newPassword });
+        .post('/auth/verify-password')
+        .send({ email, code: verifyCode });
       expect(reset.status).toBe(400);
 
       await http().post('/auth/forgot-password').send({ email });

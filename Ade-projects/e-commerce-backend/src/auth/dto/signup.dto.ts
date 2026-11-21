@@ -14,16 +14,20 @@ import {
 export class SignupDto {
   @IsString()
   @IsNotEmpty()
-  @Matches(/(?=.*[A-Z])(?=.*[a-z])/, {
-    message: 'firstname should only be alphabetical characters',
-  })
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, { message: 'firstname must contain letters only' })
   firstname!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, { message: 'middlename must contain letters only' })
+  middlename?: string;
 
   @IsString()
   @IsNotEmpty()
-  @Matches(/(?=.*[A-Z])(?=.*[a-z])/, {
-    message: 'last name should only be alphabetical characters',
-  })
+  @MaxLength(100)
+  @Matches(/^[A-Za-z]+$/, { message: 'lastname must contain letters only' })
   lastname!: string;
 
   @IsEmail()
