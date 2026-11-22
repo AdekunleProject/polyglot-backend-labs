@@ -10,9 +10,11 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { AuthUser } from '../auth/auth-user.type';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { perMinute } from '../auth/throttle';
 import { CreatePostDto } from './dto/create-post.dto';
 import { FindPostsQueryDto } from './dto/find-posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -40,6 +42,7 @@ export class PostsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Throttle(perMinute(10))
   @Post()
   create(@Body() dto: CreatePostDto, @CurrentUser() user: AuthUser) {
     return this.postsService.create(dto, user);

@@ -610,6 +610,26 @@ describe('Blog API (integration)', () => {
       expect(typeorm?.postCount).toBeGreaterThanOrEqual(1);
     });
 
+    it('does not list tags that only drafts use, and returns only the author id when a post is edited', async () => {
+      const { accessToken: token } = await signUp();
+      const tag = `draftonly${Date.now()}`;
+      const created = await http()
+        .post('/posts')
+        .set(bearer(token))
+        .send({ title: 'Hidden', content: 'x', tags: [tag] });
+      expect(created.status).toBe(201);
+
+      const tags = await http().get('/tags');
+      expect((tags.body as { name: string }[]).some((t) => t.name === tag)).toBe(false);
+
+      const edited = await http()
+        .patch(`/posts/${(created.body as PostBody).id}`)
+        .set(bearer(token))
+        .send({ title: 'Hidden again' });
+      expect(edited.status).toBe(200);
+      expect((edited.body as { author: unknown }).author).toEqual({ id: expect.any(Number) });
+    });
+
     it('requires a login to write and validates paging', async () => {
       expect((await http().post('/posts').send({ title: 'x', content: 'y' })).status).toBe(401);
       expect((await http().get('/posts?limit=100')).status).toBe(400);

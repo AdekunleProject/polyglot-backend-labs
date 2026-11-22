@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { Role } from '../common/enums/role.enum';
 import {
   ForbiddenException,
@@ -42,7 +43,9 @@ export class PostsService {
   }
 
   async create(dto: CreatePostDto, user: AuthUser) {
-    const slug = `${slugify(dto.title)}-${Date.now().toString(36)}`;
+    // A random suffix, so two posts with the same title (even in the same
+    // millisecond) never collide on the unique slug.
+    const slug = `${slugify(dto.title) || 'post'}-${randomBytes(4).toString('hex')}`;
     const post = this.postsRepository.create({
       title: dto.title,
       content: dto.content,
@@ -68,7 +71,9 @@ export class PostsService {
       });
     }
     if (query.search) {
-      qb.andWhere('post.title ILIKE :search', { search: `%${query.search}%` });
+      // % and _ typed by the visitor are matched literally, not as wildcards.
+      const literal = query.search.replace(/[\\%_]/g, '\\$&');
+      qb.andWhere('post.title ILIKE :search', { search: `%${literal}%` });
     }
 
     const [items, total] = await qb
@@ -124,7 +129,10 @@ export class PostsService {
     if (dto.content !== undefined) post.content = dto.content;
     if (dto.published !== undefined) post.published = dto.published;
     if (dto.tags !== undefined) post.tags = await this.resolveTags(dto.tags);
-    return this.postsRepository.save(post);
+    const saved = await this.postsRepository.save(post);
+    // The author was loaded for the ownership check, with their email, phone
+    // and address. Only the id goes back.
+    return { ...saved, author: { id: saved.author.id } };
   }
 
   async remove(id: number, user: AuthUser) {
@@ -136,11 +144,14 @@ export class PostsService {
   async tagsWithCounts() {
     const rows = await this.tagsRepository
       .createQueryBuilder('tag')
-      .leftJoin('tag.posts', 'post')
+      // Only published posts count, so a tag that exists only on drafts is
+      // neither listed nor counted.
+      .leftJoin('tag.posts', 'post', 'post.published = true')
       .select('tag.id', 'id')
       .addSelect('tag.name', 'name')
       .addSelect('COUNT(post.id)', 'postCount')
       .groupBy('tag.id')
+      .having('COUNT(post.id) > 0')
       .orderBy('tag.name', 'ASC')
       .getRawMany<{ id: number; name: string; postCount: string }>();
 
