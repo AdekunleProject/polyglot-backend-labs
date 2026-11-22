@@ -144,7 +144,7 @@ describe('Blog API (integration)', () => {
 
     dataSource = app.get<DataSource>(getDataSourceToken());
     await dataSource.query(
-      'TRUNCATE TABLE recovery_codes, mail_tokens, sessions, comments, posts_tags_tags, posts, tags, users RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE audit_logs, recovery_codes, mail_tokens, sessions, comments, posts_tags_tags, posts, tags, users RESTART IDENTITY CASCADE',
     );
     // The first admin was created at start, then wiped by the line above.
     await app.get(AdminBootstrapService).onApplicationBootstrap();
@@ -482,6 +482,180 @@ describe('Blog API (integration)', () => {
 
     it('answers 404 for Google sign-in when it is not configured', async () => {
       expect((await http().get('/auth/google')).status).toBe(404);
+    });
+  });
+
+  describe('roles and permissions', () => {
+    const rootLogin = () => login('admin@e2e.test', 'Admin-Passw0rd-e2e!');
+    const idOf = async (token: string) =>
+      (await http().get('/users/me').set(bearer(token))).body.id as number;
+
+    // An admin creates the account; it signs in with the emailed password and
+    // must replace it before doing anything else.
+    async function createAccount(by: Tokens, role: string) {
+      const email = nextEmail(role);
+      const created = await http()
+        .post('/users')
+        .set(bearer(by.accessToken))
+        .send({ firstname: 'Made', lastname: 'Person', email, role });
+      expect(created.status).toBe(201);
+      const temporary = mail.lastPassword(email);
+      const first = await login(email, temporary);
+      const changed = await http()
+        .post('/users/me/change-password')
+        .set(bearer(first.accessToken))
+        .send({ currentPassword: temporary, newPassword: PASSWORD });
+      expect(changed.status).toBe(201);
+      const tokens = await login(email, PASSWORD);
+      return { email, id: await idOf(tokens.accessToken), ...tokens };
+    }
+
+    it('makes a created account change its emailed password before anything else', async () => {
+      const root = await rootLogin();
+      const email = nextEmail('fresh');
+      await http()
+        .post('/users')
+        .set(bearer(root.accessToken))
+        .send({ firstname: 'Fresh', lastname: 'Person', email });
+      const temporary = mail.lastPassword(email);
+      const first = await login(email, temporary);
+
+      const me = await http().get('/users/me').set(bearer(first.accessToken));
+      expect(me.status).toBe(200);
+      expect(me.body.mustChangePassword).toBe(true);
+      expect((await http().get('/posts/mine').set(bearer(first.accessToken))).status).toBe(403);
+
+      const changed = await http()
+        .post('/users/me/change-password')
+        .set(bearer(first.accessToken))
+        .send({ currentPassword: temporary, newPassword: PASSWORD });
+      expect(changed.status).toBe(201);
+      const again = await login(email, PASSWORD);
+      expect((await http().get('/posts/mine').set(bearer(again.accessToken))).status).toBe(200);
+    });
+
+    it('lets the superadmin make admins, an admin make managers, and nobody make a superadmin', async () => {
+      const root = await rootLogin();
+      const admin = await createAccount(root, 'admin');
+      const body = (role: string) => ({
+        firstname: 'Some',
+        lastname: 'One',
+        email: nextEmail('try'),
+        role,
+      });
+      expect((await http().post('/users').set(bearer(admin.accessToken)).send(body('admin'))).status).toBe(403);
+      expect((await http().post('/users').set(bearer(admin.accessToken)).send(body('manager'))).status).toBe(201);
+      expect((await http().post('/users').set(bearer(root.accessToken)).send(body('superadmin'))).status).toBe(403);
+      const manager = await createAccount(admin, 'manager');
+      expect((await http().post('/users').set(bearer(manager.accessToken)).send(body('user'))).status).toBe(403);
+    });
+
+    it('lets a manager promote a user to manager only, and never touch an admin or themselves', async () => {
+      const root = await rootLogin();
+      const manager = await createAccount(root, 'manager');
+      const admin = await createAccount(root, 'admin');
+      const plain = await signUp();
+      const plainId = await idOf(plain.accessToken);
+
+      const promoted = await http()
+        .patch(`/users/${plainId}/role`)
+        .set(bearer(manager.accessToken))
+        .send({ role: 'manager' });
+      expect(promoted.status).toBe(200);
+      expect(promoted.body.user.role).toBe('manager');
+
+      const other = await idOf((await signUp()).accessToken);
+      const toAdmin = await http().patch(`/users/${other}/role`).set(bearer(manager.accessToken)).send({ role: 'admin' });
+      expect(toAdmin.status).toBe(403);
+      const onAdmin = await http().patch(`/users/${admin.id}/role`).set(bearer(manager.accessToken)).send({ role: 'user' });
+      expect(onAdmin.status).toBe(403);
+      const onSelf = await http().patch(`/users/${manager.id}/role`).set(bearer(manager.accessToken)).send({ role: 'manager' });
+      expect(onSelf.status).toBe(403);
+
+      const edited = await http()
+        .patch(`/users/${other}`)
+        .set(bearer(manager.accessToken))
+        .send({ firstname: 'Renamed' });
+      expect(edited.status).toBe(200);
+      expect(edited.body.user.firstname).toBe('Renamed');
+      expect((await http().patch(`/users/${admin.id}`).set(bearer(manager.accessToken)).send({ firstname: 'Nope' })).status).toBe(403);
+    });
+
+    it('shows each role only the accounts below it', async () => {
+      const root = await rootLogin();
+      const admin = await createAccount(root, 'admin');
+      const manager = await createAccount(root, 'manager');
+      const asManager = await http().get('/users?limit=50').set(bearer(manager.accessToken));
+      expect(asManager.status).toBe(200);
+      expect((asManager.body.items as { role: string }[]).every((u) => u.role === 'user')).toBe(true);
+      const asAdmin = await http().get('/users?limit=50').set(bearer(admin.accessToken));
+      expect((asAdmin.body.items as { role: string }[]).some((u) => u.role === 'admin')).toBe(false);
+      expect((await http().get(`/users/${admin.id}`).set(bearer(manager.accessToken))).status).toBe(403);
+    });
+
+    it('stops an admin acting on another admin, and cuts a deactivated admin off at once', async () => {
+      const root = await rootLogin();
+      const admin = await createAccount(root, 'admin');
+      const otherAdmin = await createAccount(root, 'admin');
+      const manager = await createAccount(admin, 'manager');
+
+      expect((await http().patch(`/users/${otherAdmin.id}/deactivate`).set(bearer(admin.accessToken))).status).toBe(403);
+      expect((await http().delete(`/users/${otherAdmin.id}`).set(bearer(admin.accessToken))).status).toBe(403);
+      expect((await http().delete(`/users/${await idOf(root.accessToken)}`).set(bearer(admin.accessToken))).status).toBe(403);
+
+      expect((await http().patch(`/users/${manager.id}/deactivate`).set(bearer(admin.accessToken))).status).toBe(200);
+      // The manager's token is still within its 15 minutes, but is refused now.
+      expect((await http().get('/users/me').set(bearer(manager.accessToken))).status).toBe(401);
+
+      expect((await http().patch(`/users/${admin.id}/deactivate`).set(bearer(root.accessToken))).status).toBe(200);
+      expect((await http().get('/users/me').set(bearer(admin.accessToken))).status).toBe(401);
+    });
+
+    it('deletes softly, hides the account, and restores it', async () => {
+      const root = await rootLogin();
+      const manager = await createAccount(root, 'manager');
+
+      expect((await http().delete(`/users/${manager.id}`).set(bearer(root.accessToken))).status).toBe(200);
+      expect((await http().post('/auth/login').send({ email: manager.email, password: PASSWORD })).status).toBe(403);
+      expect((await http().get('/users/me').set(bearer(manager.accessToken))).status).toBe(401);
+
+      const live = await http().get('/users?limit=50').set(bearer(root.accessToken));
+      expect((live.body.items as { id: number }[]).some((u) => u.id === manager.id)).toBe(false);
+      const deleted = await http().get('/users?deleted=true&limit=50').set(bearer(root.accessToken));
+      expect((deleted.body.items as { id: number }[]).some((u) => u.id === manager.id)).toBe(true);
+
+      expect((await http().post(`/users/${manager.id}/restore`).set(bearer(root.accessToken))).status).toBe(201);
+      expect((await login(manager.email, PASSWORD)).accessToken).toBeTruthy();
+    });
+
+    it('lets only the superadmin read what a user wrote, drafts included, and records each look', async () => {
+      const author = await signUp();
+      const authorId = await idOf(author.accessToken);
+      await http().post('/posts').set(bearer(author.accessToken)).send({ title: 'Secret draft', content: 'Not public' });
+      const post = await publishedPost(author.accessToken);
+      expect(
+        (await http().post(`/posts/${post.id}/comments`).set(bearer(author.accessToken)).send({ content: 'Hello' })).status,
+      ).toBe(201);
+
+      const root = await rootLogin();
+      const posts = await http().get(`/users/${authorId}/posts`).set(bearer(root.accessToken));
+      expect(posts.status).toBe(200);
+      expect((posts.body.items as { published: boolean }[]).some((p) => !p.published)).toBe(true);
+      const comments = await http().get(`/users/${authorId}/comments`).set(bearer(root.accessToken));
+      expect(comments.status).toBe(200);
+      expect(comments.body.items[0].post.slug).toBe(post.slug);
+
+      const admin = await createAccount(root, 'admin');
+      expect((await http().get(`/users/${authorId}/posts`).set(bearer(admin.accessToken))).status).toBe(403);
+      expect((await http().get(`/users/${authorId}/comments`).set(bearer(author.accessToken))).status).toBe(403);
+
+      const audit = await http().get('/audit-logs?limit=50').set(bearer(root.accessToken));
+      expect(audit.status).toBe(200);
+      const actions = (audit.body.items as { action: string; targetUserId: number }[]).filter(
+        (entry) => entry.targetUserId === authorId,
+      );
+      expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(['user.view_posts', 'user.view_comments']));
+      expect((await http().get('/audit-logs').set(bearer(admin.accessToken))).status).toBe(403);
     });
   });
 

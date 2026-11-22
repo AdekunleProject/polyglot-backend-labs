@@ -20,16 +20,21 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { uploadOptions } from '../aws/aws.multer-uploads';
 import { Role } from '../common/enums/role.enum';
+import { ChangeRoleDto } from './dto/change-role.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UserContentService } from './user-content.service';
 import { UsersService } from './users.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly content: UserContentService,
+  ) {}
 
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
@@ -56,33 +61,95 @@ export class UsersController {
     return this.usersService.remove(user.id);
   }
 
+  // Everything below is about other people's accounts. Who may do what is
+  // decided by the role (here) and by rank (in UsersService): see the
+  // permission table in the README.
+
   @Get()
-  @Roles(Role.ADMIN)
-  findAll(@Query() query: ListUsersQueryDto) {
-    return this.usersService.findAll(query.page, query.limit);
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  findAll(@Query() query: ListUsersQueryDto, @CurrentUser() actor: AuthUser) {
+    return this.usersService.findAll(actor, query);
   }
 
   @Post()
-  @Roles(Role.ADMIN)
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.createByAdmin(dto);
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  create(@Body() dto: CreateUserDto, @CurrentUser() actor: AuthUser) {
+    return this.usersService.createByAdmin(dto, actor);
+  }
+
+  @Get(':id')
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  findOne(@Param('id', ParseIntPipe) id: number, @CurrentUser() actor: AuthUser) {
+    return this.usersService.findOneFor(actor, id);
+  }
+
+  @Patch(':id')
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  updateOther(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateProfileDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.usersService.updateOther(actor, id, dto);
+  }
+
+  @Patch(':id/role')
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  changeRole(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeRoleDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.usersService.changeRole(actor, id, dto.role);
   }
 
   @Patch(':id/deactivate')
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   deactivate(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.usersService.setActive(id, actor.id, false);
+    return this.usersService.setActive(id, actor, false);
   }
 
   @Patch(':id/activate')
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   activate(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.usersService.setActive(id, actor.id, true);
+    return this.usersService.setActive(id, actor, true);
+  }
+
+  @Delete(':id')
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  softDelete(@Param('id', ParseIntPipe) id: number, @CurrentUser() actor: AuthUser) {
+    return this.usersService.softDelete(actor, id);
+  }
+
+  @Post(':id/restore')
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  restore(@Param('id', ParseIntPipe) id: number, @CurrentUser() actor: AuthUser) {
+    return this.usersService.restore(actor, id);
+  }
+
+  @Get(':id/posts')
+  @Roles(Role.SUPERADMIN)
+  postsOf(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ListUsersQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.content.postsOf(actor, id, query.page, query.limit);
+  }
+
+  @Get(':id/comments')
+  @Roles(Role.SUPERADMIN)
+  commentsOf(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ListUsersQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.content.commentsOf(actor, id, query.page, query.limit);
   }
 }

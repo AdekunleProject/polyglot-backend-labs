@@ -1,5 +1,5 @@
-import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class ListUsersQueryDto {
   @IsOptional()
@@ -14,4 +14,10 @@ export class ListUsersQueryDto {
   @Min(1)
   @Max(50)
   limit: number = 20;
+
+  // ?deleted=true lists deleted accounts instead (admins and above).
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  deleted?: boolean;
 }

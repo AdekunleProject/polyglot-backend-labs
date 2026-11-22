@@ -51,22 +51,34 @@ How it holds up:
 - **No account enumeration.** A wrong password, an unknown email and a Google-only account all answer the same 401, and forgot-password never says whether the email exists.
 - **Password rule:** 8 to 72 characters with upper and lower case, a digit and one of `!@#$%^&*`. Hashed with bcrypt (12 rounds).
 - **Limits:** a global limit per client address, and tighter limits on login (5 a minute), verify, check-reset-code and reset (5), forgot and resend (3). Login, verify, resend, forgot and check-reset-code are also limited per email address, so spreading guesses over many addresses does not help against one account (the cost: someone can delay a victim for up to a minute). The health probes are never limited.
-- **Deactivating a user** ends their refresh tokens at once. An access token already issued works until it expires (15 minutes by default).
+- **Roles are checked in the database on every request**, not read from the token. A deactivated, deleted or demoted account loses access at once, not when its 15 minute token runs out.
 
 ## Users and roles
 
-Roles are `user` (default) and `admin`. A client can never pick its own role.
+Four roles in a strict ladder: **superadmin > admin > manager > user**. A role can act only on accounts *below* its own rank, so nobody can act on themselves or on an equal, and a manager can never reach an admin.
 
-| Endpoint | Access |
-| --- | --- |
-| `GET /users/me`, `PATCH /users/me` (multipart with optional `image`), `DELETE /users/me` | signed in |
-| `POST /users/me/change-password` | signed in, needs the current password |
-| `GET /users`, `POST /users` | admin. Create emails the new user a one-time password (it is not in the response) |
-| `PATCH /users/:id/deactivate`, `PATCH /users/:id/activate` | admin |
+| Action | Superadmin | Admin | Manager |
+| --- | --- | --- | --- |
+| See and edit own profile, change own password, delete own account | yes | yes | yes |
+| List and view accounts (`GET /users`, `GET /users/:id`) | all below | managers and users | users |
+| Create an account (`POST /users`) | admin, manager, user | manager, user | no |
+| Change a role (`PATCH /users/:id/role`) | any role below superadmin | up to manager | user to manager only |
+| Edit another profile (`PATCH /users/:id`) | admins, managers, users | managers, users | users |
+| Deactivate or activate (`PATCH /users/:id/deactivate`, `/activate`) | all below | managers, users | no |
+| Delete and restore (`DELETE /users/:id`, `POST /users/:id/restore`) | all below | managers, users | no |
+| Read everything a user wrote, drafts included (`GET /users/:id/posts`, `/comments`) | yes | no | no |
+| Read the audit log (`GET /audit-logs`) | yes | no | no |
+| Edit or delete any post, delete any comment | yes | yes | no |
 
-If mail is not set up, creating a user outside production returns the password once in the response so local development still works. In production it answers 503 and creates nothing, because there would be no safe way to hand the password over. The password is in a plain-text email until they change it, a common trade-off; the alternative is to email a reset code instead.
+Details:
 
-The first admin is created at start from `ADMIN_EMAIL` and `ADMIN_PASSWORD` (12+ characters).
+- **The superadmin is not made through the API.** It is created at start from `SUPERADMIN_EMAIL` and `SUPERADMIN_PASSWORD` (12+ characters; the older `ADMIN_EMAIL` and `ADMIN_PASSWORD` names still work). If that email already has an account, it becomes the superadmin and keeps its password. No endpoint can create or promote a superadmin.
+- **Created accounts get an emailed temporary password** (never in the response) and must change it before using anything else: until then every route except `GET /users/me`, `POST /users/me/change-password` and `POST /auth/logout` answers 403. If mail is not set up, creating a user outside production returns the password once so local development still works. In production it answers 503 and creates nothing.
+- **Admins and superadmins must turn on two-factor** before using the API, when `REQUIRE_ADMIN_2FA=true` (the default in production, off elsewhere). Until then only the 2FA setup routes work.
+- **Delete is soft.** The account cannot sign in and leaves the list (`GET /users?deleted=true` shows deleted ones), but the row, posts and comments stay, and restore brings it back. Deleting your own account with `DELETE /users/me` removes it for good, with its posts and comments.
+- **Audit log.** Creating accounts, edits, role changes, deactivation, deletion, restore, and every time a superadmin reads another user's posts or comments is recorded with who, whom and when (never passwords or codes).
+
+Your own account: `GET /users/me`, `PATCH /users/me` (multipart with optional `image`), `POST /users/me/change-password` (needs the current password), `DELETE /users/me`.
 
 ## Posts, tags and comments
 
@@ -85,7 +97,7 @@ The first admin is created at start from `ADMIN_EMAIL` and `ADMIN_PASSWORD` (12+
 
 ## Configuration
 
-Set in `.env` (see `.env.example`, which explains every variable). The app refuses to start and lists what is missing. Required: the `DB_*` settings, `JWT_SECRET` and `JWT_REFRESH_SECRET` (different, 32+ characters in production). Optional: mail (`MAIL_*`), S3 (`AWS_*`), Google (`GOOGLE_*`), `ADMIN_*`, `FRONTEND_URL`, `TRUST_PROXY`, `THROTTLE_LIMIT`, `REDIS_URL`, `TWO_FACTOR_KEY`, `ENABLE_DOCS` (Swagger is on by default and off when `NODE_ENV=production`).
+Set in `.env` (see `.env.example`, which explains every variable). The app refuses to start and lists what is missing. Required: the `DB_*` settings, `JWT_SECRET` and `JWT_REFRESH_SECRET` (different, 32+ characters in production). Optional: mail (`MAIL_*`), S3 (`AWS_*`), Google (`GOOGLE_*`), `SUPERADMIN_*`, `FRONTEND_URL`, `TRUST_PROXY`, `THROTTLE_LIMIT`, `REDIS_URL`, `TWO_FACTOR_KEY`, `REQUIRE_ADMIN_2FA`, `ENABLE_DOCS` (Swagger is on by default and off when `NODE_ENV=production`).
 
 `synchronize` is off. The schema changes only through migrations (`pnpm migration:generate`, `pnpm migration:run`). Real keys belong only in a local `.env` or a Kubernetes Secret, never in Git. On AWS, leave the access keys out and use an IAM role.
 
@@ -109,7 +121,7 @@ The integration tests empty their tables, so they refuse to run unless the datab
 ## Known limitations
 
 - Mail and S3 are written and covered by fakes in the tests, but have not been exercised against a real SMTP server or bucket yet. Google sign-in has not been run against Google.
-- Sign-up answers `409` for an email that already exists, which shows whether an email has an account (login and forgot-password do not). Access tokens stay valid until they expire (15 minutes by default) after a logout or deactivation. Both are common trade-offs.
+- Sign-up answers `409` for an email that already exists, which shows whether an email has an account (login and forgot-password do not). Access tokens stay valid until they expire (15 minutes by default) after a logout (a deactivated, deleted or demoted account is cut off at once). Both are common trade-offs.
 - Rate limits are shared across replicas only when `REDIS_URL` is set. Without it, or while Redis is down, each instance counts alone (so N replicas allow about N times the limit). Redis is used for the limiter only; it is not a cache.
 - Two-factor has no admin reset yet: someone who loses both the authenticator and the backup codes needs a database change.
 - Not load tested. No in-app notifications (the e-commerce API has them).

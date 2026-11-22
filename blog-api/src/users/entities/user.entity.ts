@@ -75,6 +75,15 @@ export class User {
   @Column({ default: true })
   isActive: boolean;
 
+  // True for an account an admin created, until the emailed password is changed.
+  @Column({ default: false })
+  mustChangePassword: boolean;
+
+  // Set when an admin deletes the account. The row stays, so the posts and
+  // comments keep their author and the account can be restored.
+  @Column({ type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
+
   // Authenticator secret, encrypted (see two-factor/secret-box.ts). Never
   // selected unless asked for.
   @Column({ type: 'text', nullable: true, select: false })

@@ -55,11 +55,22 @@ export function validateEnv(
   if (get('TWO_FACTOR_KEY') && get('TWO_FACTOR_KEY').length < 16) {
     problems.push('TWO_FACTOR_KEY must be at least 16 characters');
   }
-  if (!!get('ADMIN_EMAIL') !== !!get('ADMIN_PASSWORD')) {
-    problems.push('ADMIN_EMAIL and ADMIN_PASSWORD must be set together');
+  // The superadmin comes from SUPERADMIN_* (or the older ADMIN_* names).
+  for (const [prefix, label] of [
+    ['SUPERADMIN', 'SUPERADMIN'],
+    ['ADMIN', 'ADMIN'],
+  ]) {
+    const email = get(`${prefix}_EMAIL`);
+    const password = get(`${prefix}_PASSWORD`);
+    if (!!email !== !!password) {
+      problems.push(`${label}_EMAIL and ${label}_PASSWORD must be set together`);
+    }
+    if (password && password.length < 12) {
+      problems.push(`${label}_PASSWORD must be at least 12 characters`);
+    }
   }
-  if (get('ADMIN_PASSWORD') && get('ADMIN_PASSWORD').length < 12) {
-    problems.push('ADMIN_PASSWORD must be at least 12 characters');
+  if (get('REQUIRE_ADMIN_2FA') && !['true', 'false'].includes(get('REQUIRE_ADMIN_2FA'))) {
+    problems.push('REQUIRE_ADMIN_2FA must be true or false');
   }
 
   if (problems.length > 0) {

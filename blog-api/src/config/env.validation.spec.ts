@@ -68,4 +68,16 @@ describe('validateEnv', () => {
       /TWO_FACTOR_KEY must be at least 16/,
     );
   });
+
+  it('applies the same rules to the SUPERADMIN settings and checks REQUIRE_ADMIN_2FA', () => {
+    expect(() => validateEnv({ ...base, SUPERADMIN_EMAIL: 'a@b.co' })).toThrow(
+      /SUPERADMIN_EMAIL and SUPERADMIN_PASSWORD must be set together/,
+    );
+    expect(() =>
+      validateEnv({ ...base, SUPERADMIN_EMAIL: 'a@b.co', SUPERADMIN_PASSWORD: 'short' }),
+    ).toThrow(/SUPERADMIN_PASSWORD must be at least 12/);
+    expect(() => validateEnv({ ...base, REQUIRE_ADMIN_2FA: 'yes' })).toThrow(
+      /REQUIRE_ADMIN_2FA must be true or false/,
+    );
+  });
 });

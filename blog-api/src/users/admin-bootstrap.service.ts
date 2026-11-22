@@ -8,9 +8,12 @@ import { Role } from '../common/enums/role.enum';
 import { User } from './entities/user.entity';
 
 /**
- * Creates the first admin from ADMIN_EMAIL and ADMIN_PASSWORD when the app
- * starts, so nobody has to edit the database by hand. It does nothing if the
- * variables are unset or the account already exists.
+ * Creates the superadmin from SUPERADMIN_EMAIL and SUPERADMIN_PASSWORD when
+ * the app starts (the older ADMIN_EMAIL and ADMIN_PASSWORD names still work),
+ * so nobody has to edit the database by hand. This is the only way to get a
+ * superadmin: no endpoint can create or promote one. If the email already
+ * belongs to an account, that account becomes the superadmin; its password is
+ * left alone. It does nothing if the variables are unset.
  */
 @Injectable()
 export class AdminBootstrapService implements OnApplicationBootstrap {
@@ -22,21 +25,38 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    const email = this.config.get<string>('ADMIN_EMAIL');
-    const password = this.config.get<string>('ADMIN_PASSWORD');
+    const email =
+      this.config.get<string>('SUPERADMIN_EMAIL') ||
+      this.config.get<string>('ADMIN_EMAIL');
+    const password =
+      this.config.get<string>('SUPERADMIN_PASSWORD') ||
+      this.config.get<string>('ADMIN_PASSWORD');
     if (!email || !password) return;
-    if (await this.usersRepository.findOneBy({ email })) return;
+
+    const existing = await this.usersRepository.findOneBy({ email });
+    if (existing) {
+      if (existing.role !== Role.SUPERADMIN) {
+        await this.usersRepository.update(existing.id, {
+          role: Role.SUPERADMIN,
+          isVerified: true,
+          isActive: true,
+          deletedAt: null,
+        });
+        this.logger.log(`${email} is now the superadmin`);
+      }
+      return;
+    }
 
     await this.usersRepository.save(
       this.usersRepository.create({
-        firstname: 'Admin',
-        lastname: 'Account',
+        firstname: 'Super',
+        lastname: 'Admin',
         email,
         password: await bcrypt.hash(password, BCRYPT_SALT_ROUNDS),
-        role: Role.ADMIN,
+        role: Role.SUPERADMIN,
         isVerified: true,
       }),
     );
-    this.logger.log(`Admin account created for ${email}`);
+    this.logger.log(`Superadmin account created for ${email}`);
   }
 }

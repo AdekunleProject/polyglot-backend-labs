@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { join } from 'path';
 import { DataSource } from 'typeorm';
+import { AuditLog } from './audit/entities/audit-log.entity';
 import { Comment } from './comments/entities/comment.entity';
 import { Post } from './posts/entities/post.entity';
 import { Tag } from './tags/entities/tag.entity';
@@ -17,6 +18,6 @@ export default new DataSource({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   ssl: process.env.DB_SSL === 'true',
-  entities: [User, Post, Tag, Comment, Session, MailToken, RecoveryCode],
+  entities: [User, Post, Tag, Comment, Session, MailToken, RecoveryCode, AuditLog],
   migrations: [join(__dirname, 'migrations', '*{.ts,.js}')],
 });

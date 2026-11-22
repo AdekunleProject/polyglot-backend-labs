@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { Role } from '../common/enums/role.enum';
+import { isAtLeast } from '../common/role-policy';
 import {
   ForbiddenException,
   Injectable,
@@ -117,7 +118,7 @@ export class PostsService {
       relations: { author: true, tags: true },
     });
     if (!post) throw new NotFoundException(`Post ${id} not found`);
-    if (user.role !== Role.ADMIN && post.author.id !== user.id) {
+    if (!isAtLeast(user.role, Role.ADMIN) && post.author.id !== user.id) {
       throw new ForbiddenException('You can only change your own posts');
     }
     return post;

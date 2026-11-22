@@ -443,6 +443,7 @@ export class AuthService {
       password: await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS),
       // The code came from the inbox, which proves the address is theirs.
       isVerified: true,
+      mustChangePassword: false,
     });
     // A new password signs the account out everywhere.
     await this.sessionsRepository.delete({ userId: user.id });

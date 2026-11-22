@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -10,13 +11,17 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
+import { AuditService } from '../audit/audit.service';
+import type { AuthUser } from '../auth/auth-user.type';
 import { FileUpload } from '../aws/aws.file-upload';
 import { BCRYPT_SALT_ROUNDS } from '../auth/auth.constant';
 import { Session } from '../auth/entities/session.entity';
 import { MailService } from '../mail/mail.service';
 import { ProfileImageProvider } from '../common/enums/profile-image-provider.enum';
 import { Role } from '../common/enums/role.enum';
+import { ASSIGNABLE, canManage, isAtLeast, rolesBelow } from '../common/role-policy';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -31,6 +36,7 @@ export class UsersService {
     private readonly fileUpload: FileUpload,
     private readonly mailService: MailService,
     private readonly config: ConfigService,
+    private readonly audit: AuditService,
   ) {}
 
   /** A stored image key becomes a 30 minute link. Google pictures are URLs already. */
@@ -65,6 +71,8 @@ export class UsersService {
       isVerified: user.isVerified,
       twoFactorEnabled: user.twoFactorEnabled,
       isActive: user.isActive,
+      mustChangePassword: user.mustChangePassword,
+      deletedAt: user.deletedAt,
       provider: user.provider,
       createdAt: user.createdAt,
     };
@@ -80,18 +88,41 @@ export class UsersService {
     return this.toPublic(await this.findOrFail(id));
   }
 
-  async findAll(page: number, limit: number) {
+  /**
+   * The account `actor` wants to act on, if their rank allows it: only
+   * accounts strictly below their own. Used by every admin action.
+   */
+  async requireManageable(actor: AuthUser, id: number): Promise<User> {
+    const user = await this.usersRepository.findOneBy({ id });
+    if (!user) throw new NotFoundException(`User ${id} not found`);
+    if (!canManage(actor.role, user.role)) {
+      throw new ForbiddenException('You cannot manage this account');
+    }
+    return user;
+  }
+
+  /** Only accounts below the caller's rank are listed. */
+  async findAll(actor: AuthUser, query: ListUsersQueryDto) {
+    const showDeleted = !!query.deleted && isAtLeast(actor.role, Role.ADMIN);
     const [users, total] = await this.usersRepository.findAndCount({
+      where: {
+        role: In(rolesBelow(actor.role)),
+        deletedAt: showDeleted ? Not(IsNull()) : IsNull(),
+      },
       order: { id: 'ASC' },
-      skip: (page - 1) * limit,
-      take: limit,
+      skip: (query.page - 1) * query.limit,
+      take: query.limit,
     });
     return {
       items: await Promise.all(users.map((user) => this.toPublic(user))),
       total,
-      page,
-      limit,
+      page: query.page,
+      limit: query.limit,
     };
+  }
+
+  async findOneFor(actor: AuthUser, id: number) {
+    return this.toPublic(await this.requireManageable(actor, id));
   }
 
   /**
@@ -104,7 +135,11 @@ export class UsersService {
    * safe way to hand over the password); elsewhere it is returned, so a
    * development setup without a mail server still works.
    */
-  async createByAdmin(dto: CreateUserDto) {
+  async createByAdmin(dto: CreateUserDto, actor: AuthUser) {
+    const role = dto.role ?? Role.USER;
+    if (!ASSIGNABLE[actor.role].includes(role)) {
+      throw new ForbiddenException(`You cannot create ${role} accounts`);
+    }
     if (await this.usersRepository.findOneBy({ email: dto.email })) {
       throw new ConflictException('Email already in use');
     }
@@ -114,9 +149,11 @@ export class UsersService {
         firstname: dto.firstname,
         lastname: dto.lastname,
         email: dto.email,
-        role: dto.role ?? Role.USER,
+        role,
         password: await bcrypt.hash(defaultPassword, BCRYPT_SALT_ROUNDS),
         isVerified: true,
+        // The emailed password is only for the first sign-in.
+        mustChangePassword: true,
       }),
     );
 
@@ -134,6 +171,7 @@ export class UsersService {
       ].join('\n'),
     );
     if (emailed) {
+      await this.audit.record(actor.id, 'user.create', user.id, { role });
       return {
         message: 'User created. The temporary password was emailed to them.',
         user: await this.toPublic(user),
@@ -145,6 +183,7 @@ export class UsersService {
         'The email could not be sent, so the user was not created. Check the mail settings and try again.',
       );
     }
+    await this.audit.record(actor.id, 'user.create', user.id, { role });
     return {
       message:
         'User created. Email is not available here, so the temporary password is shown once (never in production).',
@@ -200,28 +239,100 @@ export class UsersService {
     }
     await this.usersRepository.update(userId, {
       password: await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS),
+      mustChangePassword: false,
     });
     await this.sessionsRepository.delete({ userId });
     return { message: 'Password changed. Please sign in again.' };
   }
 
-  async setActive(targetId: number, actorId: number, active: boolean) {
-    if (!active && targetId === actorId) {
+  /** An admin or manager edits the profile of an account below them. */
+  async updateOther(actor: AuthUser, id: number, dto: UpdateProfileDto) {
+    const user = await this.requireManageable(actor, id);
+    const changes = Object.fromEntries(
+      Object.entries(dto).filter(([, value]) => value !== undefined),
+    );
+    Object.assign(user, changes);
+    await this.usersRepository.save(user);
+    await this.audit.record(actor.id, 'user.update', user.id, {
+      fields: Object.keys(changes),
+    });
+    return {
+      message: 'Profile updated successfully',
+      user: await this.toPublic(user),
+    };
+  }
+
+  /**
+   * Only accounts below the caller's rank, and only to a role the caller may
+   * hand out (see ASSIGNABLE). Nobody can change their own role.
+   */
+  async changeRole(actor: AuthUser, id: number, role: Role) {
+    const user = await this.requireManageable(actor, id);
+    if (!ASSIGNABLE[actor.role].includes(role)) {
+      throw new ForbiddenException(`You cannot give the ${role} role`);
+    }
+    if (user.role !== role) {
+      const from = user.role;
+      user.role = role;
+      await this.usersRepository.save(user);
+      await this.audit.record(actor.id, 'user.role_change', user.id, { from, to: role });
+    }
+    return { message: 'Role updated', user: await this.toPublic(user) };
+  }
+
+  async setActive(targetId: number, actor: AuthUser, active: boolean) {
+    if (!active && targetId === actor.id) {
       throw new BadRequestException('You cannot deactivate your own account');
     }
-    const user = await this.findOrFail(targetId);
+    const user = await this.requireManageable(actor, targetId);
+    if (user.deletedAt) {
+      throw new BadRequestException('This account is deleted. Restore it instead.');
+    }
     user.isActive = active;
     await this.usersRepository.save(user);
     if (!active) {
-      // Ends refresh tokens at once. An access token already issued works
-      // until it expires (JWT_EXPIRES_IN, 15 minutes by default).
+      // Ends refresh tokens at once. Access tokens stop working at once too,
+      // because every request checks the account in the database.
       await this.sessionsRepository.delete({ userId: targetId });
     }
+    await this.audit.record(
+      actor.id,
+      active ? 'user.activate' : 'user.deactivate',
+      user.id,
+    );
     return {
       message: active
         ? 'User account activated successfully'
         : 'User account deactivated successfully',
     };
+  }
+
+  /**
+   * "Delete" by an admin is soft: the account cannot sign in and disappears
+   * from the list, but the row, the posts and the comments stay, so a mistake
+   * can be undone with restore.
+   */
+  async softDelete(actor: AuthUser, id: number) {
+    if (id === actor.id) {
+      throw new BadRequestException('You cannot delete your own account here');
+    }
+    const user = await this.requireManageable(actor, id);
+    if (!user.deletedAt) {
+      await this.usersRepository.update(id, { deletedAt: new Date(), isActive: false });
+      await this.sessionsRepository.delete({ userId: id });
+      await this.audit.record(actor.id, 'user.delete', id);
+    }
+    return { message: 'User account deleted. It can be restored.' };
+  }
+
+  async restore(actor: AuthUser, id: number) {
+    const user = await this.requireManageable(actor, id);
+    if (!user.deletedAt) {
+      throw new BadRequestException('This account is not deleted');
+    }
+    await this.usersRepository.update(id, { deletedAt: null, isActive: true });
+    await this.audit.record(actor.id, 'user.restore', id);
+    return { message: 'User account restored' };
   }
 
   async remove(userId: number) {
