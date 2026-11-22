@@ -114,6 +114,10 @@ To also test the Redis rate limiter against a real Redis, add `docker run -d --n
 
 The integration tests empty their tables, so they refuse to run unless the database name ends in `_it`.
 
+## Postman
+
+`postman/` has a collection and an environment that walk through the whole API: sign-up, sessions, the three-step password reset, profile, posts, comments and every role rule. Import both files, select the **blog-api (local)** environment, and run the folders in order. Tokens and ids are saved by the tests. Locally the emailed codes are printed in the API log, so copy them into the `code` and `resetCode` variables when a request says so. Folders 7 to 9 need `SUPERADMIN_EMAIL` and `SUPERADMIN_PASSWORD` in `.env` (put the same values in the `superEmail` and `superPassword` variables).
+
 ## CI
 
 `.github/workflows/blog-api.yaml` builds the image, runs lint (report only), unit tests, integration tests against PostgreSQL, a Trivy scan (fails on fixable CRITICAL), and a smoke test of the production image. On master it pushes the image to GHCR tagged by commit SHA.
