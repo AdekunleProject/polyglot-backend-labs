@@ -348,7 +348,9 @@ describe('Checkout (integration)', () => {
         expect(statuses).toEqual([201, 400]);
         expect(await stockOf(variantId)).toBe(0);
       }
-    });
+      // Ten rounds of transactions: quick on a local MongoDB, slow against a
+      // remote one such as Atlas, hence the longer limit.
+    }, 300_000);
   });
 
   describe('payment initialisation', () => {
