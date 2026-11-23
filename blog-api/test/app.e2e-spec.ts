@@ -750,6 +750,88 @@ describe('Blog API (integration)', () => {
     });
   });
 
+  describe('dashboards and reports', () => {
+    const rootLogin = () => login('admin@e2e.test', 'Admin-Passw0rd-e2e!');
+    async function staff(role: string) {
+      const root = await rootLogin();
+      const email = nextEmail(role);
+      expect(
+        (await http().post('/users').set(bearer(root.accessToken)).send({ firstname: 'S', lastname: 'T', email, role })).status,
+      ).toBe(201);
+      const temporary = mail.lastPassword(email);
+      const first = await login(email, temporary);
+      await http()
+        .post('/users/me/change-password')
+        .set(bearer(first.accessToken))
+        .send({ currentPassword: temporary, newPassword: PASSWORD });
+      return login(email, PASSWORD);
+    }
+
+    it('gives each role only its own dashboard', async () => {
+      const root = await rootLogin();
+      const manager = await staff('manager');
+      const admin = await staff('admin');
+      const reader = await signUp();
+
+      expect((await http().get('/dashboard/manager').set(bearer(manager.accessToken))).status).toBe(200);
+      expect((await http().get('/dashboard/admin').set(bearer(manager.accessToken))).status).toBe(403);
+      expect((await http().get('/dashboard/admin').set(bearer(admin.accessToken))).status).toBe(200);
+      expect((await http().get('/dashboard/superadmin').set(bearer(admin.accessToken))).status).toBe(403);
+      const top = await http().get('/dashboard/superadmin').set(bearer(root.accessToken));
+      expect(top.status).toBe(200);
+      expect(top.body.staffWithoutTwoFactor).toBeDefined();
+      expect((await http().get('/dashboard/manager').set(bearer(reader.accessToken))).status).toBe(403);
+    });
+
+    it('shows each person only the staff reports they may see', async () => {
+      const root = await rootLogin();
+      const manager = await staff('manager');
+      const admin = await staff('admin');
+
+      const own = await http().get('/reports/staff-activity').set(bearer(manager.accessToken));
+      expect(own.status).toBe(200);
+      expect(own.body.staff).toHaveLength(1);
+
+      const adminView = await http().get('/reports/staff-activity').set(bearer(admin.accessToken));
+      const roles = (adminView.body.staff as { role: string }[]).map((p) => p.role);
+      expect(roles).not.toContain('superadmin');
+      expect(roles).toContain('manager');
+
+      const rootView = await http().get('/reports/staff-activity').set(bearer(root.accessToken));
+      expect((rootView.body.staff as { role: string }[]).map((p) => p.role)).toEqual(
+        expect.arrayContaining(['superadmin', 'admin', 'manager']),
+      );
+    });
+
+    it('returns CSV, rejects bad periods and keeps the content report for admins', async () => {
+      const root = await rootLogin();
+      const manager = await staff('manager');
+
+      const csv = await http().get('/reports/staff-activity?format=csv').set(bearer(root.accessToken));
+      expect(csv.status).toBe(200);
+      expect(csv.headers['content-type']).toContain('text/csv');
+      expect(csv.text.split('\n')[0]).toContain('totalActions');
+
+      expect(
+        (await http().get('/reports/staff-activity?from=2026-02-01&to=2026-01-01').set(bearer(root.accessToken))).status,
+      ).toBe(400);
+      expect((await http().get('/reports/content').set(bearer(manager.accessToken))).status).toBe(403);
+      const content = await http().get('/reports/content').set(bearer(root.accessToken));
+      expect(content.status).toBe(200);
+      expect(content.body.totals).toBeDefined();
+    });
+
+    it('emails the weekly digest to the superadmin, on request only for superadmins', async () => {
+      const root = await rootLogin();
+      const admin = await staff('admin');
+      expect((await http().post('/reports/digest/send').set(bearer(admin.accessToken))).status).toBe(403);
+      const sent = await http().post('/reports/digest/send').set(bearer(root.accessToken));
+      expect(sent.status).toBe(201);
+      expect(sent.body.sent).toBeGreaterThan(0);
+      expect(mail.sent.some((m) => m.subject === 'Your weekly blog summary')).toBe(true);
+    });
+  });
+
   describe('posts', () => {
     it('keeps drafts private until the author publishes them', async () => {
       const { accessToken: token } = await signUp();

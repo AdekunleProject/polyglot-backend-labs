@@ -130,3 +130,18 @@ The integration tests empty their tables, so they refuse to run unless the datab
 - Rate limits are shared across replicas only when `REDIS_URL` is set. Without it, or while Redis is down, each instance counts alone (so N replicas allow about N times the limit). Redis is used for the limiter only; it is not a cache.
 - Two-factor has no admin reset yet: someone who loses both the authenticator and the backup codes needs a database change.
 - Not load tested. No in-app notifications (the e-commerce API has them).
+
+## Dashboards, reports and the weekly digest
+
+| Route | Who | What |
+| --- | --- | --- |
+| `GET /dashboard/manager` | manager and above | Posts, comments, readers, and your own last 30 days of actions |
+| `GET /dashboard/admin` | admin, superadmin | The above, plus accounts by role, deactivated and deleted accounts, and moderation counts |
+| `GET /dashboard/superadmin` | superadmin | The above, plus staff without 2FA and the latest audit entries |
+| `GET /reports/staff-activity?from&to&format=csv` | manager and above | What staff did, with flags. Superadmin sees admins and managers, an admin sees managers, a manager sees only themselves |
+| `GET /reports/content?from&to&format=csv` | admin, superadmin | Posts, comments, sign-ups and moderation, per day |
+| `POST /reports/digest/send` | superadmin | Sends the weekly summary now |
+
+`from` and `to` are ISO dates (default: the last 30 days, at most one year). Flags: many deletes, many lookups of other people's content, activity in the quiet hours, and no 2FA. The limits are in `.env` (`FLAG_*`, `OFF_HOURS_*`, `REPORT_TZ_OFFSET_HOURS`).
+
+The digest is an email to every active superadmin, sent on `DIGEST_DAY` after `DIGEST_HOUR` when `WEEKLY_DIGEST=true`. The blog has no in-app notifications, so there is no bell. The schedule runs in the app process and uses the audit log to send once a week; with several replicas running, two could send in the same hour, so run the digest on one replica or trigger it from a cron job calling the route.
