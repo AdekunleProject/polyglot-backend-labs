@@ -214,7 +214,7 @@ export class AnalyticsService {
     if (actor.role === Role.MANAGER) {
       return {
         summary: { orders: dashboard.summary.orders },
-        recentOrders: (dashboard.recentOrders as Record<string, unknown>[]).map(
+        recentOrders: (dashboard.recentOrders as unknown as Record<string, unknown>[]).map(
           (order) => ({
             _id: order._id,
             status: order.status,
@@ -425,7 +425,7 @@ export class AnalyticsService {
     if (actor?.role === Role.MANAGER) {
       return {
         summary: counts,
-        recentOrders: (recentOrders as Record<string, unknown>[]).map(
+        recentOrders: (recentOrders as unknown as Record<string, unknown>[]).map(
           (order) => {
             const { total: _total, ...rest } = order;
             return rest;
