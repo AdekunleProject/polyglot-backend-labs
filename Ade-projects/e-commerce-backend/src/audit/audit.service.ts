@@ -68,4 +68,41 @@ export class AuditService {
     ]);
     return { items, total, page, limit };
   }
+
+  /** What one person did since `from`: a count per action, and when they last did anything. */
+  async summaryFor(actorId: string, from: Date) {
+    const rows = await this.logs.aggregate<{
+      _id: string;
+      count: number;
+      last: Date;
+    }>([
+      { $match: { actorId: new Types.ObjectId(actorId), createdAt: { $gte: from } } },
+      { $group: { _id: '$action', count: { $sum: 1 }, last: { $max: '$createdAt' } } },
+      { $sort: { count: -1 } },
+    ]);
+    const byAction: Record<string, number> = {};
+    let total = 0;
+    let lastActionAt: Date | null = null;
+    for (const row of rows) {
+      byAction[row._id] = row.count;
+      total += row.count;
+      if (!lastActionAt || row.last > lastActionAt) lastActionAt = row.last;
+    }
+    return { since: from, total, byAction, lastActionAt };
+  }
+
+  /** The newest entries, for the superadmin's front page. */
+  async recent(limit: number) {
+    return this.logs.find().sort({ createdAt: -1 }).limit(limit).lean();
+  }
+
+  /** Everything the company did since `from`, counted by action. */
+  async countsByAction(from: Date) {
+    const rows = await this.logs.aggregate<{ _id: string; count: number }>([
+      { $match: { createdAt: { $gte: from } } },
+      { $group: { _id: '$action', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]);
+    return Object.fromEntries(rows.map((row) => [row._id, row.count]));
+  }
 }

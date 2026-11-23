@@ -1,5 +1,6 @@
 import { AnalyticsService } from './analytics.service';
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { User, UserSchema } from '../users/schemas/user.schema';
@@ -16,10 +17,17 @@ import {
 import { Brand, BrandSchema } from '../brands/schemas/brand.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { Payment, PaymentSchema } from '../payments/schemas/payment.schema';
+import { AuditModule } from '../audit/audit.module';
+import {
+  RefundRequest,
+  RefundRequestSchema,
+} from '../refunds/schemas/refund-request.schema';
 import { AnalyticsController } from './analytics.controller';
 
 @Module({
   imports: [
+    AuditModule,
+    ConfigModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Product.name, schema: ProductSchema },
@@ -28,6 +36,7 @@ import { AnalyticsController } from './analytics.controller';
       { name: Brand.name, schema: BrandSchema },
       { name: Order.name, schema: OrderSchema },
       { name: Payment.name, schema: PaymentSchema },
+      { name: RefundRequest.name, schema: RefundRequestSchema },
     ]),
   ],
   controllers: [AnalyticsController],

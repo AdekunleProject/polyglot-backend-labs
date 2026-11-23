@@ -35,6 +35,30 @@ export class AnalyticsController {
     return this.analyticsService.getAdminDashboard(user.id);
   }
 
+  @Get('manager')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  getManagerDashboard(@CurrentUser() user: CurrentUserInterface) {
+    return this.analyticsService.getManagerDashboard(user);
+  }
+
+  @Get('superadmin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN)
+  getSuperadminDashboard() {
+    return this.analyticsService.getSuperadminDashboard();
+  }
+
+  @Get('customers/:userId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  getCustomerDashboardForStaff(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+  ) {
+    return this.analyticsService.getCustomerDashboardFor(user, userId);
+  }
+
   @Get('customer')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.CUSTOMER)
@@ -46,7 +70,7 @@ export class AnalyticsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
   getOrdersDashboard(@CurrentUser() user: CurrentUserInterface) {
-    return this.analyticsService.getOrdersDashboard();
+    return this.analyticsService.getOrdersDashboard(user);
   }
 
   // BUG FIX: this and getProductListDashboard() below were both mapped to
