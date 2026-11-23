@@ -1,8 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Headers,
   HttpCode,
+  Param,
+  ParseUUIDPipe,
   Post,
   Req,
   Res,
@@ -94,8 +98,15 @@ export class AuthController {
   async verifyPassword(
     @Body() dto: VerifyPasswordDto,
     @Res({ passthrough: true }) res: Response,
+    @Headers('x-client') client?: string,
   ) {
     const result = await this.authService.verifyPasswordResetOtp(dto);
+    // A phone app has no browser cookie jar: it asks for the token in the
+    // response (X-Client: mobile) and sends it back in X-Reset-Token. Web
+    // clients keep the HttpOnly cookie, which scripts cannot read.
+    if (client === 'mobile') {
+      return { message: result.message, resetToken: result.resetToken };
+    }
     res.cookie('password_reset', result.resetToken, {
       httpOnly: true,
       secure: this.config.get<string>('NODE_ENV') === 'production',
@@ -115,8 +126,10 @@ export class AuthController {
     @Body() dto: ResetPasswordDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
+    @Headers('x-reset-token') headerToken?: string,
   ) {
-    const resetToken = readCookie(req.headers.cookie, 'password_reset');
+    const resetToken =
+      readCookie(req.headers.cookie, 'password_reset') ?? headerToken;
     if (!resetToken) {
       throw new UnauthorizedException(
         'Password reset session missing or expired',
@@ -137,6 +150,21 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   logout(@CurrentUser() user: AuthUser, @Body() dto: LogoutDto) {
     return this.authService.logout(user.id, dto.refreshToken);
+  }
+
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  sessions(@CurrentUser() user: AuthUser) {
+    return this.authService.listSessions(user.id);
+  }
+
+  @Delete('sessions/:id')
+  @UseGuards(JwtAuthGuard)
+  revokeSession(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.authService.revokeSession(user.id, id);
   }
 
   @Get('me')

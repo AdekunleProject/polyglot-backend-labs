@@ -369,6 +369,32 @@ describe('Blog API (integration)', () => {
       expect((await http().post('/auth/refresh').send({ refreshToken: user.refreshToken })).status).toBe(401);
     });
 
+    it('lets a phone app reset without cookies, with X-Client: mobile', async () => {
+      const user = await signUp();
+      await http().post('/auth/forgot-password').send({ email: user.email });
+      const verified = await http()
+        .post('/auth/verify-password')
+        .set('X-Client', 'mobile')
+        .send({ email: user.email, code: mail.lastCode(user.email) });
+      expect(verified.status).toBe(200);
+      expect(verified.body.resetToken).toEqual(expect.any(String));
+      expect(verified.headers['set-cookie']).toBeUndefined();
+
+      const reset = await http()
+        .post('/auth/reset-password')
+        .set('X-Reset-Token', verified.body.resetToken)
+        .send({ newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+      expect(reset.status).toBe(200);
+      expect((await login(user.email, NEW_PASSWORD)).accessToken).toBeTruthy();
+    });
+
+    it('does not put the reset token in the body for web clients', async () => {
+      const user = await signUp();
+      await http().post('/auth/forgot-password').send({ email: user.email });
+      const res = await http().post('/auth/verify-password').send({ email: user.email, code: mail.lastCode(user.email) });
+      expect(res.body.resetToken).toBeUndefined();
+    });
+
     it('needs the reset session, and the code must belong to that email', async () => {
       const noCookie = await http()
         .post('/auth/reset-password')
@@ -747,6 +773,37 @@ describe('Blog API (integration)', () => {
         .post('/auth/2fa/login')
         .send({ email: 'a@e2e.test', challengeToken: 'nope', code: '123456' });
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('devices', () => {
+    it('labels each sign-in, lists the devices and signs one out', async () => {
+      const user = await signUp();
+      const phone = await http()
+        .post('/auth/login')
+        .send({ email: user.email, password: PASSWORD, deviceName: "Ada's phone" });
+      expect(phone.status).toBe(201);
+
+      const list = await http().get('/auth/sessions').set(bearer(phone.body.accessToken));
+      expect(list.status).toBe(200);
+      const sessions = list.body as { id: string; deviceName: string | null; tokenHash?: string }[];
+      expect(sessions.length).toBeGreaterThanOrEqual(2);
+      expect(sessions.some((s) => s.deviceName === "Ada's phone")).toBe(true);
+      expect(sessions.every((s) => s.tokenHash === undefined)).toBe(true);
+
+      const target = sessions.find((s) => s.deviceName === "Ada's phone")!;
+      expect((await http().delete(`/auth/sessions/${target.id}`).set(bearer(phone.body.accessToken))).status).toBe(200);
+      expect((await http().post('/auth/refresh').send({ refreshToken: phone.body.refreshToken })).status).toBe(401);
+      expect((await http().delete(`/auth/sessions/${target.id}`).set(bearer(phone.body.accessToken))).status).toBe(404);
+    });
+
+    it('never lets someone sign out another person\'s device', async () => {
+      const a = await signUp();
+      const b = await signUp();
+      const list = await http().get('/auth/sessions').set(bearer(a.accessToken));
+      const mine = (list.body as { id: string }[])[0];
+      expect((await http().delete(`/auth/sessions/${mine.id}`).set(bearer(b.accessToken))).status).toBe(404);
+      expect((await http().get('/auth/sessions')).status).toBe(401);
     });
   });
 

@@ -73,6 +73,10 @@ export function validateEnv(
     problems.push('REQUIRE_ADMIN_2FA must be true or false');
   }
 
+  if (get('MIN_APP_VERSION') && !/^\d+\.\d+\.\d+$/.test(get('MIN_APP_VERSION'))) {
+    problems.push('MIN_APP_VERSION must look like 1.4.0');
+  }
+
   if (problems.length > 0) {
     throw new Error(
       `Invalid environment configuration:\n - ${problems.join('\n - ')}`,
