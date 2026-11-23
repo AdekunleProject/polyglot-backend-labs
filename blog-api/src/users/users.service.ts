@@ -280,7 +280,12 @@ export class UsersService {
     return { message: 'Role updated', user: await this.toPublic(user) };
   }
 
-  async setActive(targetId: number, actor: AuthUser, active: boolean) {
+  async setActive(
+    targetId: number,
+    actor: AuthUser,
+    active: boolean,
+    reason?: string,
+  ) {
     if (!active && targetId === actor.id) {
       throw new BadRequestException('You cannot deactivate your own account');
     }
@@ -299,6 +304,7 @@ export class UsersService {
       actor.id,
       active ? 'user.activate' : 'user.deactivate',
       user.id,
+      reason ? { reason } : undefined,
     );
     return {
       message: active
@@ -312,7 +318,7 @@ export class UsersService {
    * from the list, but the row, the posts and the comments stay, so a mistake
    * can be undone with restore.
    */
-  async softDelete(actor: AuthUser, id: number) {
+  async softDelete(actor: AuthUser, id: number, reason?: string) {
     if (id === actor.id) {
       throw new BadRequestException('You cannot delete your own account here');
     }
@@ -320,7 +326,7 @@ export class UsersService {
     if (!user.deletedAt) {
       await this.usersRepository.update(id, { deletedAt: new Date(), isActive: false });
       await this.sessionsRepository.delete({ userId: id });
-      await this.audit.record(actor.id, 'user.delete', id);
+      await this.audit.record(actor.id, 'user.delete', id, reason ? { reason } : undefined);
     }
     return { message: 'User account deleted. It can be restored.' };
   }

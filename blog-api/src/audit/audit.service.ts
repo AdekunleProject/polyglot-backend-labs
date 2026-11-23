@@ -12,7 +12,10 @@ export type AuditAction =
   | 'user.delete'
   | 'user.restore'
   | 'user.view_posts'
-  | 'user.view_comments';
+  | 'user.view_comments'
+  | 'post.edit'
+  | 'post.remove'
+  | 'comment.remove';
 
 @Injectable()
 export class AuditService {

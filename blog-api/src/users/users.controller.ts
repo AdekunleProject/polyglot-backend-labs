@@ -20,6 +20,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { uploadOptions } from '../aws/aws.multer-uploads';
 import { Role } from '../common/enums/role.enum';
+import { ReasonDto } from '../common/dto/reason.dto';
 import { ChangeRoleDto } from './dto/change-role.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -107,9 +108,10 @@ export class UsersController {
   @Roles(Role.ADMIN, Role.SUPERADMIN)
   deactivate(
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReasonDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.usersService.setActive(id, actor, false);
+    return this.usersService.setActive(id, actor, false, dto.reason);
   }
 
   @Patch(':id/activate')
@@ -123,8 +125,12 @@ export class UsersController {
 
   @Delete(':id')
   @Roles(Role.ADMIN, Role.SUPERADMIN)
-  softDelete(@Param('id', ParseIntPipe) id: number, @CurrentUser() actor: AuthUser) {
-    return this.usersService.softDelete(actor, id);
+  softDelete(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReasonDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.usersService.softDelete(actor, id, dto.reason);
   }
 
   @Post(':id/restore')

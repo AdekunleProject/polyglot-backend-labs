@@ -452,10 +452,11 @@ describe('Blog API (integration)', () => {
       const self = await http().get('/users/me').set(bearer(admin.accessToken));
       const selfDeactivate = await http()
         .patch(`/users/${self.body.id}/deactivate`)
-        .set(bearer(admin.accessToken));
+        .set(bearer(admin.accessToken))
+        .send({ reason: 'Reason given in the test' });
       expect(selfDeactivate.status).toBe(400);
 
-      const off = await http().patch(`/users/${madeId}/deactivate`).set(bearer(admin.accessToken));
+      const off = await http().patch(`/users/${madeId}/deactivate`).set(bearer(admin.accessToken)).send({ reason: 'Reason given in the test' });
       expect(off.status).toBe(200);
       expect((await http().post('/auth/login').send({ email, password: madePassword })).status).toBe(403);
       expect((await http().post('/auth/refresh').send({ refreshToken: made.refreshToken })).status).toBe(401);
@@ -599,15 +600,15 @@ describe('Blog API (integration)', () => {
       const otherAdmin = await createAccount(root, 'admin');
       const manager = await createAccount(admin, 'manager');
 
-      expect((await http().patch(`/users/${otherAdmin.id}/deactivate`).set(bearer(admin.accessToken))).status).toBe(403);
-      expect((await http().delete(`/users/${otherAdmin.id}`).set(bearer(admin.accessToken))).status).toBe(403);
-      expect((await http().delete(`/users/${await idOf(root.accessToken)}`).set(bearer(admin.accessToken))).status).toBe(403);
+      expect((await http().patch(`/users/${otherAdmin.id}/deactivate`).set(bearer(admin.accessToken)).send({ reason: 'Reason given in the test' })).status).toBe(403);
+      expect((await http().delete(`/users/${otherAdmin.id}`).set(bearer(admin.accessToken)).send({ reason: 'Reason given in the test' })).status).toBe(403);
+      expect((await http().delete(`/users/${await idOf(root.accessToken)}`).set(bearer(admin.accessToken)).send({ reason: 'Reason given in the test' })).status).toBe(403);
 
-      expect((await http().patch(`/users/${manager.id}/deactivate`).set(bearer(admin.accessToken))).status).toBe(200);
+      expect((await http().patch(`/users/${manager.id}/deactivate`).set(bearer(admin.accessToken)).send({ reason: 'Reason given in the test' })).status).toBe(200);
       // The manager's token is still within its 15 minutes, but is refused now.
       expect((await http().get('/users/me').set(bearer(manager.accessToken))).status).toBe(401);
 
-      expect((await http().patch(`/users/${admin.id}/deactivate`).set(bearer(root.accessToken))).status).toBe(200);
+      expect((await http().patch(`/users/${admin.id}/deactivate`).set(bearer(root.accessToken)).send({ reason: 'Reason given in the test' })).status).toBe(200);
       expect((await http().get('/users/me').set(bearer(admin.accessToken))).status).toBe(401);
     });
 
@@ -615,7 +616,7 @@ describe('Blog API (integration)', () => {
       const root = await rootLogin();
       const manager = await createAccount(root, 'manager');
 
-      expect((await http().delete(`/users/${manager.id}`).set(bearer(root.accessToken))).status).toBe(200);
+      expect((await http().delete(`/users/${manager.id}`).set(bearer(root.accessToken)).send({ reason: 'Reason given in the test' })).status).toBe(200);
       expect((await http().post('/auth/login').send({ email: manager.email, password: PASSWORD })).status).toBe(403);
       expect((await http().get('/users/me').set(bearer(manager.accessToken))).status).toBe(401);
 
@@ -827,6 +828,31 @@ describe('Blog API (integration)', () => {
         .set(bearer(admin.accessToken))
         .send({ title: 'Edited by admin' });
       expect(adminEdit.status).toBe(200);
+    });
+    it('makes staff give a reason to remove someone else\'s post or comment, and records it', async () => {
+      const author = await signUp();
+      const reader = await signUp();
+      const root = await login('admin@e2e.test', 'Admin-Passw0rd-e2e!');
+      const admin = root;
+
+      const post = await publishedPost(author.accessToken);
+      const comment = (
+        await http().post(`/posts/${post.id}/comments`).set(bearer(reader.accessToken)).send({ content: 'Moderate me' })
+      ).body as { id: number };
+
+      expect((await http().delete(`/comments/${comment.id}`).set(bearer(admin.accessToken))).status).toBe(400);
+      expect(
+        (await http().delete(`/comments/${comment.id}`).set(bearer(admin.accessToken)).send({ reason: 'Abusive language' })).status,
+      ).toBe(200);
+
+      expect((await http().delete(`/posts/${post.id}`).set(bearer(admin.accessToken))).status).toBe(400);
+      expect(
+        (await http().delete(`/posts/${post.id}`).set(bearer(admin.accessToken)).send({ reason: 'Copied from another site' })).status,
+      ).toBe(200);
+
+      const audit = await http().get('/audit-logs?limit=50').set(bearer(root.accessToken));
+      const actions = (audit.body.items as { action: string }[]).map((row) => row.action);
+      expect(actions).toEqual(expect.arrayContaining(['comment.remove', 'post.remove']));
     });
   });
 

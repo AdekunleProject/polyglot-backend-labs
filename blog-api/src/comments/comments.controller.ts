@@ -1,3 +1,4 @@
+import { OptionalReasonDto } from '../common/dto/reason.dto';
 import {
   Body,
   Controller,
@@ -45,7 +46,11 @@ export class CommentsController {
 
   @UseGuards(JwtAuthGuard)
   @Delete('comments/:id')
-  remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
-    return this.commentsService.remove(id, user);
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: OptionalReasonDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.commentsService.remove(id, user, dto.reason);
   }
 }

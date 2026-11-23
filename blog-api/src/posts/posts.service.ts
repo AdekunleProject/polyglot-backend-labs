@@ -1,7 +1,9 @@
 import { randomBytes } from 'crypto';
 import { Role } from '../common/enums/role.enum';
+import { AuditService } from '../audit/audit.service';
 import { isAtLeast } from '../common/role-policy';
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -27,6 +29,7 @@ export class PostsService {
   constructor(
     @InjectRepository(Post) private readonly postsRepository: Repository<Post>,
     @InjectRepository(Tag) private readonly tagsRepository: Repository<Tag>,
+    private readonly audit: AuditService,
   ) {}
 
   // Turn ['NestJS', 'sql'] into Tag rows, creating the ones that don't exist yet.
@@ -131,14 +134,32 @@ export class PostsService {
     if (dto.published !== undefined) post.published = dto.published;
     if (dto.tags !== undefined) post.tags = await this.resolveTags(dto.tags);
     const saved = await this.postsRepository.save(post);
+    if (post.author.id !== user.id) {
+      await this.audit.record(user.id, 'post.edit', post.author.id, {
+        postId: id,
+        fields: Object.keys(dto),
+      });
+    }
     // The author was loaded for the ownership check, with their email, phone
     // and address. Only the id goes back.
     return { ...saved, author: { id: saved.author.id } };
   }
 
-  async remove(id: number, user: AuthUser) {
-    await this.findOwned(id, user);
+  async remove(id: number, user: AuthUser, reason?: string) {
+    const post = await this.findOwned(id, user);
+    // Removing someone else's post is moderation: it needs a written reason.
+    const moderating = post.author.id !== user.id;
+    if (moderating && !reason) {
+      throw new BadRequestException('A reason is required to remove someone else\'s post');
+    }
     await this.postsRepository.delete(id);
+    if (moderating) {
+      await this.audit.record(user.id, 'post.remove', post.author.id, {
+        postId: id,
+        title: post.title,
+        reason,
+      });
+    }
     return { deleted: true };
   }
 

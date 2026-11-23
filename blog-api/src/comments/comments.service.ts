@@ -1,6 +1,7 @@
 import { Role } from '../common/enums/role.enum';
 import { isAtLeast } from '../common/role-policy';
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -8,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/auth-user.type';
+import { AuditService } from '../audit/audit.service';
 import { Post } from '../posts/entities/post.entity';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { Comment } from './entities/comment.entity';
@@ -19,6 +21,7 @@ export class CommentsService {
     private readonly commentsRepository: Repository<Comment>,
     @InjectRepository(Post)
     private readonly postsRepository: Repository<Post>,
+    private readonly audit: AuditService,
   ) {}
 
   private async requirePublishedPost(postId: number) {
@@ -54,7 +57,7 @@ export class CommentsService {
     return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async remove(commentId: number, user: AuthUser) {
+  async remove(commentId: number, user: AuthUser, reason?: string) {
     const comment = await this.commentsRepository.findOne({
       where: { id: commentId },
       relations: { author: true, post: { author: true } },
@@ -68,7 +71,21 @@ export class CommentsService {
     if (!allowed)
       throw new ForbiddenException('You cannot delete this comment');
 
+    // Staff removing someone else's comment is moderation: a reason, and a record.
+    const moderating =
+      isAtLeast(user.role, Role.ADMIN) && comment.author.id !== user.id;
+    if (moderating && !reason) {
+      throw new BadRequestException('A reason is required to remove someone else\'s comment');
+    }
+
     await this.commentsRepository.delete(commentId);
+    if (moderating) {
+      await this.audit.record(user.id, 'comment.remove', comment.author.id, {
+        commentId,
+        postId: comment.post.id,
+        reason,
+      });
+    }
     return { deleted: true };
   }
 }
