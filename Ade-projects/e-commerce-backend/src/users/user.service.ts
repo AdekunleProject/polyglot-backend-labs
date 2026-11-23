@@ -13,7 +13,7 @@ import { InjectModel, MongooseModule } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../helpers/mail/mail-service';
 
-import { FilterQuery, Model, PipelineStage, Types } from 'mongoose';
+import { QueryFilter, Model, PipelineStage, Types } from 'mongoose';
 import { Module } from '@nestjs/common';
 
 import * as bcrypt from 'bcryptjs';
@@ -159,7 +159,7 @@ export class UsersService {
   async findAll(actor: CurrentUserInterface, query: ListUsersQueryDto) {
     const showDeleted =
       !!query.deleted && (actor.role === Role.ADMIN || actor.role === Role.SUPERADMIN);
-    const filter: FilterQuery<User> = {
+    const filter: QueryFilter<User> = {
       role: { $in: rolesBelow(actor.role) },
       deletedAt: showDeleted ? { $ne: null } : null,
     };

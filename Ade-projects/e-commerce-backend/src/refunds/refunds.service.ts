@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { FilterQuery, Model, Types } from 'mongoose';
+import { QueryFilter, Model, Types } from 'mongoose';
 import { AuditService } from 'src/audit/audit.service';
 import { FileUpload } from 'src/aws/aws.file-upload';
 import { Role } from 'src/common/enums/role.enum';
@@ -183,7 +183,7 @@ export class RefundsService {
   }
 
   async list(query: ListRefundsQueryDto) {
-    const filter: FilterQuery<RefundRequest> = {};
+    const filter: QueryFilter<RefundRequest> = {};
     if (query.status) filter.status = query.status;
     const [items, total] = await Promise.all([
       this.requests

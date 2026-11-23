@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { FilterQuery, Model, Types } from 'mongoose';
+import { QueryFilter, Model, Types } from 'mongoose';
 import { AuditLog } from './schemas/audit-log.schema';
 
 export type AuditAction =
@@ -48,7 +48,7 @@ export class AuditService {
   }
 
   async list(page: number, limit: number, filter: AuditFilter = {}) {
-    const query: FilterQuery<AuditLog> = {};
+    const query: QueryFilter<AuditLog> = {};
     if (filter.actorId) query.actorId = new Types.ObjectId(filter.actorId);
     if (filter.action) query.action = filter.action;
     if (filter.from || filter.to) {
