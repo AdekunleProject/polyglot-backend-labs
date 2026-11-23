@@ -11,6 +11,7 @@ export class CreateAdminProfileDto {
   @IsEmail()
   email!: string;
 
+  // What the creator may hand out depends on their own role (see role-policy).
   @IsEnum(Role)
   role!: Role;
 }

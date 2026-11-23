@@ -152,7 +152,7 @@ export class AuthController {
 
   @Post('logout')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.CUSTOMER, Role.ADMIN)
+  @Roles(Role.CUSTOMER, Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
   logout(@CurrentUser() user: CurrentUserInterface, @Body() dto: LogoutDto) {
     return this.authService.logout(user.id, dto?.refreshToken);
   }

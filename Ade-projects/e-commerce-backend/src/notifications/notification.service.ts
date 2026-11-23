@@ -44,13 +44,14 @@ export class NotificationsService {
     message: string,
     link?: string,
     excludeUserId?: string | Types.ObjectId,
+    roles: Role[] = [Role.ADMIN],
   ) {
     // Matches the same role query pattern already used in
     // AnalyticsService/UsersService elsewhere in this codebase — the
     // User schema types `role` as an ObjectId ref despite storing a plain
     // Role enum string, so this follows the existing working convention
     // rather than "fixing" that mismatch here.
-    const filter: Record<string, unknown> = { role: Role.ADMIN };
+    const filter: Record<string, unknown> = { role: { $in: roles } };
     if (excludeUserId) filter._id = { $ne: excludeUserId };
     const admins = await this.userModel.find(filter).select('_id');
     if (!admins.length) return [];

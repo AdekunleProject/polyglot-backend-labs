@@ -384,7 +384,15 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
+  /** Deactivated and deleted accounts cannot sign in or keep a session. */
+  private assertAccountUsable(user: User) {
+    if (user.deactivatedAt || user.deletedAt) {
+      throw new UnauthorizedException('This account is not available');
+    }
+  }
+
   private async issueTokens(user: User) {
+    this.assertAccountUsable(user);
     const accessToken = await this.signAccessToken(user);
     const refreshToken = await this.startSession(user._id.toString());
 
@@ -421,6 +429,7 @@ export class AuthService {
     if (!user || !session) {
       throw new UnauthorizedException('Session not found');
     }
+    this.assertAccountUsable(user);
 
     // A valid, signed token that is not the current one for this session was
     // already used. Either the real user or a thief has an old copy, so end

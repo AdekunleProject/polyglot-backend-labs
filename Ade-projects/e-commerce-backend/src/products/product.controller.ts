@@ -46,7 +46,7 @@ export class ProductsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   @UseInterceptors(FilesInterceptor('images', 10, uploadOptions))
   create(
     @Body() dto: CreateProductDto,
@@ -58,14 +58,14 @@ export class ProductsController {
 
   @Put(':productId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   update(@Param('productId') productId: string, @Body() dto: UpdateProductDto) {
     return this.productsService.update(productId, dto);
   }
 
   @Delete(':productId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   remove(@Param('productId') productId: string) {
     return this.productsService.remove(productId);
   }

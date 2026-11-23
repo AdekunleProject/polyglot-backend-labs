@@ -209,7 +209,7 @@ describe('Checkout (integration)', () => {
     );
     await Promise.all(Object.values(connection.models).map((m) => m.init()));
 
-    adminToken = await createUser(Role.ADMIN);
+    adminToken = await createUser(Role.MANAGER);
   });
 
   beforeEach(() => {

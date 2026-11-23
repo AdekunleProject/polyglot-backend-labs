@@ -61,7 +61,7 @@ export class User extends Document {
   @Factory((faker) => faker!.location.streetAddress())
   @Prop({ required: false, default: null })
   address!: string;
-  @Factory((faker) => faker!.helpers.arrayElement([Role.CUSTOMER, Role.ADMIN]))
+  @Factory((faker) => faker!.helpers.arrayElement([Role.CUSTOMER]))
     @Prop({
     type: String,
     enum: Object.values(Role),
@@ -76,6 +76,18 @@ export class User extends Document {
   profileImage?: string;
 
   @Prop({ default: false }) isActive!: boolean;
+
+  // Set by an admin to block sign-in. These two dates, not isActive, decide
+  // whether an account may be used (isActive defaults to false for historical
+  // reasons, so it cannot be enforced).
+  @Prop({ type: Date, default: null }) deactivatedAt?: Date | null;
+
+  // Set when an admin deletes the account. The document stays, so orders keep
+  // their customer and the account can be restored.
+  @Prop({ type: Date, default: null }) deletedAt?: Date | null;
+
+  // True for an account an admin created, until the emailed password is changed.
+  @Prop({ default: false }) mustChangePassword!: boolean;
   @Prop({ required: false, default: null }) token!: string;
   @Prop({ type: String, default: null }) resetToken!: string;
   @Prop({ type: Date, default: null }) resetTokenExpires!: Date;

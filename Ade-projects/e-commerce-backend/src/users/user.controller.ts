@@ -8,6 +8,7 @@ import {
   Delete,
   Param,
   Patch,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -19,6 +20,11 @@ import { RolesGuard } from 'src/common/guards/roles.guard';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/role.enum';
+import { ChangeRoleDto } from './dto/change-role.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { ReasonDto } from './dto/reason.dto';
+import { UpdateOtherProfileDto } from './dto/update-other-profile.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { CreateUserDto } from './dto/create-user-dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import type { CurrentUserInterface } from '../common/interfaces/current-user.interface';
@@ -45,9 +51,12 @@ export class UsersController {
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  findAll() {
-    return this.usersService.findAll();
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.MANAGER)
+  findAll(
+    @CurrentUser() user: CurrentUserInterface,
+    @Query() query: ListUsersQueryDto,
+  ) {
+    return this.usersService.findAll(user, query);
   }
 
   @Get('me')
@@ -98,20 +107,96 @@ export class UsersController {
     );
   }
 
+  @Post('me/change-password')
+  @UseGuards(JwtAuthGuard)
+  changePassword(
+    @CurrentUser() user: CurrentUserInterface,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.usersService.changePassword(user.id, dto);
+  }
+
   @Post('create-admin-profile')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
   async createAdminProfile(
     @CurrentUser() user: CurrentUserInterface,
     @Body() createAdminProfileDto: CreateAdminProfileDto,
   ) {
-    return this.usersService.createAdminProfile(user.id, createAdminProfileDto);
+    return this.usersService.createAdminProfile(user, createAdminProfileDto);
+  }
+
+  @Get(':userId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.MANAGER)
+  findOne(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.findOneFor(user, userId);
+  }
+
+  @Patch(':userId/profile')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.MANAGER)
+  updateOther(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+    @Body() dto: UpdateOtherProfileDto,
+  ) {
+    return this.usersService.updateOther(user, userId, dto);
+  }
+
+  @Patch(':userId/role')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  changeRole(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+    @Body() dto: ChangeRoleDto,
+  ) {
+    return this.usersService.changeRole(user, userId, dto.role);
   }
 
   @Patch(':userId/deactivate')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  async deactivateUser(@Param('userId') userId: string) {
-    return this.usersService.deactivateUser(userId);
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  deactivate(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+    @Body() dto: ReasonDto,
+  ) {
+    return this.usersService.deactivate(user, userId, dto.reason);
+  }
+
+  @Patch(':userId/activate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  activate(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.activate(user, userId);
+  }
+
+  @Delete(':userId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  softDelete(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+    @Body() dto: ReasonDto,
+  ) {
+    return this.usersService.softDelete(user, userId, dto.reason);
+  }
+
+  @Patch(':userId/restore')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  restore(
+    @CurrentUser() user: CurrentUserInterface,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.restore(user, userId);
   }
 }

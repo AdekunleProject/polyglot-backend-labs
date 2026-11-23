@@ -14,7 +14,7 @@ export class AdminSeeders implements Seeder {
   async seed(): Promise<any> {
     // Generate 10 users.
     const admin = DataFactory.createForClass(User).generate(10);
-    const exists = await this.userModel.findOne({ role: Role.ADMIN });
+    const exists = await this.userModel.findOne({ role: Role.SUPERADMIN });
 
     // Insert into the database.
     if (!exists) {

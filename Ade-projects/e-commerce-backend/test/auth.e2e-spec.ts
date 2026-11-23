@@ -269,14 +269,14 @@ describe('Authentication (integration)', () => {
   });
 
   describe('admin-created accounts', () => {
-    async function adminToken() {
+    async function adminToken(role: Role = Role.SUPERADMIN) {
       const email = nextEmail('admin');
       await userModel.create({
         firstname: 'Root',
         lastname: 'Admin',
         email,
         password: await bcrypt.hash(PASSWORD, 4),
-        role: Role.ADMIN,
+        role,
         isVerified: true,
         isActive: true,
       });
@@ -311,7 +311,30 @@ describe('Authentication (integration)', () => {
       }
     });
 
-    it('is for admins only', async () => {
+    it('lets an admin create managers but not another admin', async () => {
+      const token = await adminToken(Role.ADMIN);
+      const manager = await http()
+        .post('/users/create-admin-profile')
+        .set(bearer(token))
+        .send({ firstname: 'M', lastname: 'One', email: nextEmail('mgr'), role: Role.MANAGER });
+      expect(manager.status).toBe(201);
+      const admin = await http()
+        .post('/users/create-admin-profile')
+        .set(bearer(token))
+        .send({ firstname: 'A', lastname: 'Two', email: nextEmail('adm'), role: Role.ADMIN });
+      expect(admin.status).toBe(403);
+    });
+
+    it('never lets anyone create a superadmin', async () => {
+      const token = await adminToken();
+      const res = await http()
+        .post('/users/create-admin-profile')
+        .set(bearer(token))
+        .send({ firstname: 'S', lastname: 'Su', email: nextEmail('su'), role: Role.SUPERADMIN });
+      expect(res.status).toBe(403);
+    });
+
+    it('is for staff only', async () => {
       const { accessToken } = await newCustomer();
       const res = await http()
         .post('/users/create-admin-profile')

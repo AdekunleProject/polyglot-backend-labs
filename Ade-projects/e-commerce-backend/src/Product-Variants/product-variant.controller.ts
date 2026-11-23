@@ -36,7 +36,7 @@ export class VariantsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   @UseInterceptors(FilesInterceptor('images', 10, uploadOptions))
   create(
     @Body() dto: CreateProductVariantDto,
@@ -48,7 +48,7 @@ export class VariantsController {
 
   @Patch(':varientId/stock')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   async updateStock(
     @Param('varientId') varientId: string,
     @Body('stock') stock: number,
@@ -57,7 +57,7 @@ export class VariantsController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   @Delete(':id')
   async remove(@Param('id') id: string) {
     return this.variantsService.remove(id);

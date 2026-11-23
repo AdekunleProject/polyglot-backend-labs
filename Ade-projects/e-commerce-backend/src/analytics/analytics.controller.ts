@@ -30,7 +30,7 @@ export class AnalyticsController {
 
   @Get('admin')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   async getAdminDashboard(@CurrentUser() user: CurrentUserInterface) {
     return this.analyticsService.getAdminDashboard(user.id);
   }
@@ -44,7 +44,7 @@ export class AnalyticsController {
 
   @Get('orders')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
   getOrdersDashboard(@CurrentUser() user: CurrentUserInterface) {
     return this.analyticsService.getOrdersDashboard();
   }
@@ -58,21 +58,21 @@ export class AnalyticsController {
   // `/products/inventory`.
   @Get('products')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
   getAddProductDashboard() {
     return this.analyticsService.getAddProductDashboard();
   }
 
   @Get('products/inventory')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
   getProductListDashboard() {
     return this.analyticsService.getProductListDashboard();
   }
 
   @Get('transactions')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   getTransactionsDashboard() {
     return this.analyticsService.getTransactionsDashboard();
   }

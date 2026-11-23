@@ -38,7 +38,7 @@ export class OrdersController {
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
   async findAll() {
     return this.ordersService.findAll();
   }
@@ -62,14 +62,14 @@ export class OrdersController {
 
   @Get(':orderId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
   async findOrder(@Param('orderId') orderId: string) {
     return this.ordersService.findOrder(orderId);
   }
 
   @Put(':orderId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   async update(@Param('orderId') orderId: string, @Body() dto: UpdateOrderDto) {
     return this.ordersService.update(orderId, dto);
   }

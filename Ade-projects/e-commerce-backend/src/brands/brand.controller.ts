@@ -40,7 +40,7 @@ export class BrandsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   @UseInterceptors(FileInterceptor('logo', uploadOptions))
   create(
     @Body() dto: CreateBrandDto,
@@ -51,14 +51,14 @@ export class BrandsController {
 
   @Put('/:brandId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   update(@Param('brandId') brandId: string, @Body() dto: UpdateBrandDto) {
     return this.brandsService.update(brandId, dto);
   }
 
   @Delete(':brandId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.MANAGER)
   remove(@Param('brandId') brandId: string) {
     return this.brandsService.remove(brandId);
   }

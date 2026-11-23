@@ -103,21 +103,21 @@ export class PaymentsController {
 
   @Get(':paymentId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   findPayment(@Param('paymentId') paymentId: string) {
     return this.paymentsService.findPayment(paymentId);
   }
 
   @Get('verify/:reference')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   async verifyPayment(@Param('reference') reference: string) {
     return this.paymentsService.verifyPayment(reference);
   }
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
   async verifyAllPayments() {
     return this.paymentsService.verifyAllPayments();
   }

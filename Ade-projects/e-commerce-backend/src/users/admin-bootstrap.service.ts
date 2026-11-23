@@ -12,8 +12,10 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
   constructor(@InjectModel(User.name) private readonly userModel: Model<User>) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    const email = process.env.ADMIN_EMAIL;
-    const password = process.env.ADMIN_PASSWORD;
+    // SUPERADMIN_* is the name now; ADMIN_* still works for older setups.
+    const email = process.env.SUPERADMIN_EMAIL ?? process.env.ADMIN_EMAIL;
+    const password =
+      process.env.SUPERADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD;
     if (!email || !password) {
       return;
     }
@@ -22,14 +24,14 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
       return;
     }
     await this.userModel.create({
-      firstname: 'Admin',
-      lastname: 'User',
+      firstname: 'Super',
+      lastname: 'Admin',
       email,
       password: await bcrypt.hash(password, 12),
-      role: Role.ADMIN,
+      role: Role.SUPERADMIN,
       isVerified: true,
       isActive: true,
     });
-    this.logger.log(`Admin account created for ${email}`);
+    this.logger.log(`Superadmin account created for ${email}`);
   }
 }
