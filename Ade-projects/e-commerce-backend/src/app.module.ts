@@ -12,6 +12,7 @@ import { FileUpload } from './aws/aws.file-upload';
 import { OrdersModule } from 'src/orders/order.module';
 import { PaymentsModule } from 'src/payments/payment.module';
 import { AnalyticsModule } from 'src/analytics/analytics.module';
+import { RefundsModule } from 'src/refunds/refunds.module';
 import { NotificationsModule } from 'src/notifications/notification.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -69,6 +70,7 @@ import { validateEnv } from './config/env.validation';
     PaymentsModule,
     AnalyticsModule,
     NotificationsModule,
+    RefundsModule,
   ],
 
   controllers: [AppController],

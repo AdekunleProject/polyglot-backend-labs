@@ -154,6 +154,10 @@ export class Order extends Document {
 
   @Prop({ type: ShippingAddress, required: true })
   shippingAddress!: ShippingAddress;
+
+  /** Set when the status becomes `delivered`. Refund and replacement windows start here. */
+  @Prop({ type: Date, default: null })
+  deliveredAt!: Date | null;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

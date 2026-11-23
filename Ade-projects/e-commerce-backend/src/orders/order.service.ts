@@ -221,7 +221,11 @@ export class OrdersService {
       const statusChanged =
         update.status !== undefined && update.status !== previous.status;
 
-      const order = await this.orderModel.findByIdAndUpdate(orderId, update, {
+      const changes: Record<string, unknown> = { ...update };
+      if (statusChanged && update.status === OrderStatus.DELIVERED) {
+        changes.deliveredAt = new Date();
+      }
+      const order = await this.orderModel.findByIdAndUpdate(orderId, changes, {
         new: true,
       });
       if (!order) {
@@ -243,5 +247,31 @@ export class OrdersService {
       console.error(error);
       if (error) throw error;
     }
+  }
+
+  /**
+   * Cancels an order whose cancellation refund was approved, and puts the
+   * items back in stock. Safe to call twice.
+   */
+  async cancelForRefund(orderId: string) {
+    const order = await this.orderModel.findOneAndUpdate(
+      { _id: orderId, status: { $ne: OrderStatus.CANCELLED } },
+      { $set: { status: OrderStatus.CANCELLED } },
+      { new: true },
+    );
+    if (!order) return;
+    await this.restoreStock(
+      order.items.map((item) => ({
+        variantId: item.variantId.toString(),
+        quantity: item.quantity,
+      })),
+    );
+    await this.notificationsService.notifyUser(
+      order.user.toString(),
+      NotificationType.ORDER_STATUS_CHANGED,
+      'Order cancelled',
+      'Your order has been cancelled.',
+      `/orders/${order._id}`,
+    );
   }
 }

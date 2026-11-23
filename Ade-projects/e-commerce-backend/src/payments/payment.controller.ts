@@ -22,7 +22,6 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import type { CurrentUserInterface } from '../common/interfaces/current-user.interface';
 import { CurrentUser } from '../common/decorators/current-user.decorators';
-import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { InitializeBankTransferDto } from './dto/initialize-bank-transfer.dto';
 import { ConfirmBankTransferDto } from './dto/confirm-bank-transfer.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -55,13 +54,6 @@ export class PaymentsController {
       req.rawBody,
       req.body,
     );
-  }
-
-  @Post('refund')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  async refundPayment(@Body() dto: RefundPaymentDto) {
-    return this.paymentsService.refundPayment(dto);
   }
 
   @Post('bank-transfer')

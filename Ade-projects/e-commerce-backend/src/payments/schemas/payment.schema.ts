@@ -60,6 +60,10 @@ export class Payment extends Document {
   @Prop()
   receiptUrl?: string;
 
+  /** Money actually returned, in the main unit (naira). Can be less than `amount`. */
+  @Prop({ min: 0 })
+  refundedAmount?: number;
+
   @Prop()
   confirmedBy?: Types.ObjectId;
 

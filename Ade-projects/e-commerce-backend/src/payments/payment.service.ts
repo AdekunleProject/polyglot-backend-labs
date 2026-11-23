@@ -353,6 +353,7 @@ export class PaymentsService {
 
       payment.status = PaymentStatus.REFUNDED;
       payment.refundedAt = new Date();
+      payment.refundedAmount = dto.amount / 100;
       payment.gatewayResponse = paystackRefund;
 
       await payment.save({ session });
@@ -377,7 +378,7 @@ export class PaymentsService {
         payment.user.toString(),
         NotificationType.PAYMENT_REFUNDED,
         'Payment refunded',
-        `Your payment of ${payment.currency} ${payment.amount.toFixed(2)} has been refunded.`,
+        `${payment.currency} ${(dto.amount / 100).toFixed(2)} of your payment has been refunded.`,
         `/orders/${payment.order}`,
       );
 
