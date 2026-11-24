@@ -9,6 +9,7 @@ import { EmailThrottlerGuard } from './auth/email-throttler.guard';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { ChatModule } from './chat/chat.module';
 import { DevicesModule } from './devices/devices.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -60,6 +61,7 @@ import { validateEnv } from './config/env.validation';
     AuthModule,
     UsersModule,
     DevicesModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [
