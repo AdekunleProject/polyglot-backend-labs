@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -108,8 +109,14 @@ export class SendMessageBodyDto {
 }
 
 export class CreateUploadDto {
+  // The chat the file is for. Leave out for a status post and set forStatus.
+  @IsOptional()
   @IsUUID()
-  conversationId: string;
+  conversationId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  forStatus?: boolean;
 
   @IsIn(['image', 'file', 'voice', 'video'])
   kind: 'image' | 'file' | 'voice' | 'video';

@@ -12,6 +12,7 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { FileUpload } from '../src/aws/aws.file-upload';
 import { decryptBackup } from '../src/backups/backup-crypto';
+import { StatusService } from '../src/status/status.service';
 import { MailService } from '../src/mail/mail.service';
 import { SmsService } from '../src/phone/sms.service';
 
@@ -151,7 +152,7 @@ describe('Chat (integration)', () => {
     await app
       .get<DataSource>(getDataSourceToken())
       .query(
-        'TRUNCATE TABLE backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE TABLE status_views, status_audience, statuses, backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
   });
 
@@ -689,6 +690,112 @@ describe('Chat (integration)', () => {
       await http().delete(`/backups/${started.body.id}`).set(auth(eve)).expect(200);
       expect([...files.objects.keys()].some((k) => k.includes(started.body.id))).toBe(false);
       expect((await http().get(`/backups/${started.body.id}`).set(auth(eve))).status).toBe(404);
+    });
+  });
+
+  describe('status posts', () => {
+    let fay: Person;
+    let gus: Person;
+    let hal: Person;
+    let ivy: Person;
+
+    beforeAll(async () => {
+      [fay, gus, hal, ivy] = [await person('Fay'), await person('Gus'), await person('Hal'), await person('Ivy')];
+      await http().post('/conversations/direct').set(auth(fay)).send({ userId: gus.id }).expect(200);
+      await http().post('/conversations/direct').set(auth(fay)).send({ userId: hal.id }).expect(200);
+    });
+
+    const post = (p: Person, body: Record<string, unknown>) => http().post('/status').set(auth(p)).send(body);
+    const feed = async (p: Person) => (await http().get('/status/feed').set(auth(p))).body as {
+      user: { id: number };
+      statuses: { id: number; viewed: boolean }[];
+      allViewed: boolean;
+    }[];
+
+    it('shows a text status to contacts only, and records each view once', async () => {
+      const made = await post(fay, { type: 'text', body: 'good morning', bgColor: '#1F8A70' });
+      expect(made.status).toBe(201);
+      expect(new Date(made.body.expiresAt).getTime()).toBeGreaterThan(Date.now() + 23 * 3600_000);
+
+      expect((await feed(gus))[0].statuses.map((s) => s.id)).toContain(made.body.id);
+      expect((await feed(ivy)).length).toBe(0);
+      expect((await http().post(`/status/${made.body.id}/view`).set(auth(ivy))).status).toBe(404);
+
+      await http().post(`/status/${made.body.id}/view`).set(auth(gus)).expect(200);
+      await http().post(`/status/${made.body.id}/view`).set(auth(gus)).expect(200);
+      const viewers = await http().get(`/status/${made.body.id}/viewers`).set(auth(fay));
+      expect(viewers.body).toHaveLength(1);
+      expect(viewers.body[0].id).toBe(gus.id);
+      expect((await http().get(`/status/${made.body.id}/viewers`).set(auth(gus))).status).toBe(403);
+      expect((await feed(gus))[0].allViewed).toBe(true);
+      expect((await http().get('/status/mine').set(auth(fay))).body[0].viewCount).toBe(1);
+    });
+
+    it('honours "only these people" and "all contacts except"', async () => {
+      const only = await post(fay, { type: 'text', body: 'just gus', privacy: 'only', audienceIds: [gus.id] });
+      const except = await post(fay, { type: 'text', body: 'not gus', privacy: 'except', audienceIds: [gus.id] });
+      const idsFor = async (p: Person) => (await feed(p)).flatMap((g) => g.statuses.map((s) => s.id));
+      expect(await idsFor(gus)).toContain(only.body.id);
+      expect(await idsFor(gus)).not.toContain(except.body.id);
+      expect(await idsFor(hal)).not.toContain(only.body.id);
+      expect(await idsFor(hal)).toContain(except.body.id);
+      expect((await post(fay, { type: 'text', body: 'x', privacy: 'only' })).status).toBe(400);
+    });
+
+    it('posts a video through a status upload and enforces the rules', async () => {
+      const upload = (body: Record<string, unknown>) => http().post('/media/uploads').set(auth(fay)).send(body);
+      expect((await upload({ kind: 'voice', contentType: 'audio/mp4', size: 1000, durationMs: 1000, forStatus: true })).status).toBe(400);
+      expect((await upload({ kind: 'video', contentType: 'video/mp4', size: 1000, durationMs: 1000 })).status).toBe(400);
+
+      const long = await upload({ kind: 'video', contentType: 'video/mp4', size: 1_000_000, durationMs: 90_000, forStatus: true });
+      files.finish(long.body.uploadUrl, 1_000_000);
+      expect((await post(fay, { type: 'video', mediaId: long.body.mediaId })).status).toBe(400);
+
+      const ok = await upload({ kind: 'video', contentType: 'video/mp4', size: 2_000_000, durationMs: 20_000, forStatus: true });
+      expect(ok.status).toBe(200);
+      expect(ok.body.uploadUrl).toContain('/status/');
+      files.finish(ok.body.uploadUrl, 2_000_000);
+      const made = await post(fay, { type: 'video', mediaId: ok.body.mediaId, body: 'sunset' });
+      expect(made.status).toBe(201);
+      expect(made.body.media.url).toContain('https://files.test/get/status/');
+      expect(made.body.media).not.toHaveProperty('key');
+      expect((await post(gus, { type: 'video', mediaId: ok.body.mediaId })).status).toBe(400);
+    });
+
+    it('turns a reply into a chat message to the poster', async () => {
+      const made = await post(fay, { type: 'text', body: 'who is up for football?' });
+      const reply = await http().post(`/status/${made.body.id}/reply`).set(auth(gus)).send({ clientId: 'sr-1', body: 'me!' });
+      expect(reply.status).toBe(201);
+      const chat = (await http().post('/conversations/direct').set(auth(fay)).send({ userId: gus.id })).body.id;
+      const history = await http().get(`/conversations/${chat}/messages?limit=1`).set(auth(fay));
+      expect(history.body.items[0].body).toContain('me!');
+      expect(history.body.items[0].body).toContain('who is up for football?');
+      expect((await http().post(`/status/${made.body.id}/reply`).set(auth(ivy)).send({ clientId: 'sr-2', body: 'hi' })).status).toBe(404);
+    });
+
+    it('lets only the owner delete, and removes the file', async () => {
+      const up = await http().post('/media/uploads').set(auth(fay)).send({ kind: 'image', contentType: 'image/png', size: 3000, forStatus: true });
+      files.finish(up.body.uploadUrl, 3000);
+      const made = await post(fay, { type: 'image', mediaId: up.body.mediaId });
+      expect((await http().delete(`/status/${made.body.id}`).set(auth(gus))).status).toBe(403);
+      await http().delete(`/status/${made.body.id}`).set(auth(fay)).expect(200);
+      expect(files.deleted.some((k) => k.startsWith('status/') && k.endsWith('.png'))).toBe(true);
+      expect((await http().post(`/status/${made.body.id}/view`).set(auth(gus))).status).toBe(404);
+    });
+
+    it('hides an expired status at once and the sweep removes the row and file', async () => {
+      const up = await http().post('/media/uploads').set(auth(fay)).send({ kind: 'image', contentType: 'image/jpeg', size: 4000, forStatus: true });
+      files.finish(up.body.uploadUrl, 4000);
+      const made = await post(fay, { type: 'image', mediaId: up.body.mediaId });
+      const db = app.get<DataSource>(getDataSourceToken());
+      await db.query(`UPDATE statuses SET "expiresAt" = now() - interval '10 minutes' WHERE id = $1`, [made.body.id]);
+
+      expect((await feed(gus)).flatMap((g) => g.statuses.map((s) => s.id))).not.toContain(made.body.id);
+      expect((await http().post(`/status/${made.body.id}/view`).set(auth(gus))).status).toBe(404);
+      expect(await app.get(StatusService).sweep()).toBeGreaterThanOrEqual(1);
+      const left = (await db.query(`SELECT 1 FROM statuses WHERE id = $1`, [made.body.id])) as unknown[];
+      expect(left).toHaveLength(0);
+      expect(files.deleted.some((k) => k.endsWith('.jpg'))).toBe(true);
     });
   });
 });

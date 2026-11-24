@@ -27,6 +27,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
   ],
   controllers: [ChatController, MediaController],
   providers: [ChatGateway, ConversationsService, MessagesService, MediaService],
-  exports: [ConversationsService],
+  exports: [ConversationsService, MessagesService, MediaService],
 })
 export class ChatModule {}

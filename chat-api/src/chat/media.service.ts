@@ -17,7 +17,7 @@ import {
 interface UploadRow {
   id: string;
   ownerId: number;
-  conversationId: string;
+  conversationId: string | null;
   kind: MediaKind;
   key: string;
   contentType: string;
@@ -57,7 +57,15 @@ export class MediaService {
 
   /** Step 1: the phone asks where to upload. Nothing is stored yet. */
   async createUpload(me: number, dto: CreateUploadDto) {
-    await this.conversations.requireMember(dto.conversationId, me);
+    if (dto.forStatus) {
+      if (dto.conversationId) throw new BadRequestException('A status upload has no conversationId');
+      if (dto.kind !== 'image' && dto.kind !== 'video') {
+        throw new BadRequestException('A status can be a photo or a video');
+      }
+    } else {
+      if (!dto.conversationId) throw new BadRequestException('conversationId is required');
+      await this.conversations.requireMember(dto.conversationId, me);
+    }
     const extension = extensionFor(dto.kind, dto.contentType);
     if (!extension) {
       throw new BadRequestException(`That file type is not allowed for ${dto.kind}`);
@@ -78,7 +86,7 @@ export class MediaService {
 
     const id = randomUUID();
     // The key is made here, never taken from the client's file name.
-    const key = `chat/${dto.conversationId}/${id}${extension}`;
+    const key = dto.forStatus ? `status/${me}/${id}${extension}` : `chat/${dto.conversationId}/${id}${extension}`;
     const uploadUrl = await this.files.createUploadUrl(key, dto.contentType, dto.size);
     await this.db.query(
       `INSERT INTO media_uploads (id, "ownerId", "conversationId", kind, key, "contentType", size, name,
@@ -87,7 +95,7 @@ export class MediaService {
       [
         id,
         me,
-        dto.conversationId,
+        dto.forStatus ? null : dto.conversationId,
         dto.kind,
         key,
         dto.contentType.toLowerCase(),
@@ -112,7 +120,7 @@ export class MediaService {
    * Step 3: the message is being sent. The upload must be yours, for this
    * chat, finished, the size you declared, and not used by another message.
    */
-  async claim(me: number, conversationId: string, mediaId: string, type: MediaKind): Promise<StoredMedia> {
+  async claim(me: number, conversationId: string | null, mediaId: string, type: MediaKind): Promise<StoredMedia> {
     const rows = (await this.db.query(`SELECT * FROM media_uploads WHERE id = $1`, [mediaId])) as UploadRow[];
     const upload = rows[0];
     if (!upload || upload.ownerId !== me || upload.conversationId !== conversationId) {
