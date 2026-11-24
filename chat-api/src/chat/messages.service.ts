@@ -32,6 +32,17 @@ interface MessageRow {
   deletedAt: Date | null;
 }
 
+/**
+ * TypeORM answers UPDATE ... RETURNING with [rows, affectedCount], but an
+ * INSERT ... RETURNING or a SELECT with just the rows. This accepts both.
+ */
+export function rowsOf<T>(result: unknown): T[] {
+  if (Array.isArray(result) && result.length === 2 && Array.isArray(result[0]) && typeof result[1] === 'number') {
+    return result[0] as T[];
+  }
+  return result as T[];
+}
+
 export function present(row: MessageRow, status?: Status, media: unknown = null) {
   const deleted = !!row.deletedAt;
   return {
@@ -263,10 +274,12 @@ export class MessagesService {
     if (Date.now() - new Date(row.createdAt).getTime() > this.editWindowMs) {
       throw new BadRequestException('It is too late to edit this message');
     }
-    const updated = (await this.db.query(
-      `UPDATE messages SET body = $2, "editedAt" = now() WHERE id = $1 RETURNING *`,
-      [messageId, body.trim()],
-    )) as MessageRow[];
+    const updated = rowsOf<MessageRow>(
+      await this.db.query(`UPDATE messages SET body = $2, "editedAt" = now() WHERE id = $1 RETURNING *`, [
+        messageId,
+        body.trim(),
+      ]),
+    );
     const message = await this.view(updated[0]);
     this.realtime.emitToUsers(await this.conversations.memberIds(row.conversationId), 'message:updated', message);
     return message;
@@ -289,7 +302,7 @@ export class MessagesService {
 
   async markRead(me: number, conversationId: string, upToId: number) {
     await this.conversations.requireMember(conversationId, me);
-    const updated = (await this.db.query(
+    const updated = rowsOf<{ upToId: number }>(await this.db.query(
       `UPDATE conversation_members m
        SET "lastReadMessageId" = GREATEST(m."lastReadMessageId", LEAST($3::int, COALESCE(c."lastMessageId", 0))),
            "lastDeliveredMessageId" = GREATEST(m."lastDeliveredMessageId", LEAST($3::int, COALESCE(c."lastMessageId", 0)))
@@ -297,7 +310,7 @@ export class MessagesService {
        WHERE c.id = m."conversationId" AND m."conversationId" = $1 AND m."userId" = $2
        RETURNING m."lastReadMessageId" AS "upToId"`,
       [conversationId, me, upToId],
-    )) as { upToId: number }[];
+    ));
     const upTo = updated[0]?.upToId ?? 0;
     this.realtime.emitToUsers(await this.conversations.memberIds(conversationId), 'receipt', {
       conversationId,
@@ -310,14 +323,14 @@ export class MessagesService {
 
   async markDelivered(me: number, conversationId: string, upToId: number) {
     await this.conversations.requireMember(conversationId, me);
-    const updated = (await this.db.query(
+    const updated = rowsOf<{ upToId: number }>(await this.db.query(
       `UPDATE conversation_members m
        SET "lastDeliveredMessageId" = GREATEST(m."lastDeliveredMessageId", LEAST($3::int, COALESCE(c."lastMessageId", 0)))
        FROM conversations c
        WHERE c.id = m."conversationId" AND m."conversationId" = $1 AND m."userId" = $2
        RETURNING m."lastDeliveredMessageId" AS "upToId"`,
       [conversationId, me, upToId],
-    )) as { upToId: number }[];
+    ));
     const upTo = updated[0]?.upToId ?? 0;
     this.realtime.emitToUsers(await this.conversations.memberIds(conversationId), 'receipt', {
       conversationId,
@@ -330,7 +343,7 @@ export class MessagesService {
 
   /** The phone just connected: everything waiting for it counts as delivered. */
   async markAllDelivered(me: number) {
-    const rows = (await this.db.query(
+    const rows = rowsOf<{ conversationId: string; upToId: number }>(await this.db.query(
       `UPDATE conversation_members m
        SET "lastDeliveredMessageId" = c."lastMessageId"
        FROM conversations c
@@ -338,7 +351,7 @@ export class MessagesService {
          AND c."lastMessageId" IS NOT NULL AND m."lastDeliveredMessageId" < c."lastMessageId"
        RETURNING m."conversationId", m."lastDeliveredMessageId" AS "upToId"`,
       [me],
-    )) as { conversationId: string; upToId: number }[];
+    ));
     for (const row of rows) {
       this.realtime.emitToUsers(await this.conversations.memberIds(row.conversationId), 'receipt', {
         conversationId: row.conversationId,
