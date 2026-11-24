@@ -11,6 +11,7 @@ function build(options: { emailed: boolean; nodeEnv?: string; exists?: boolean }
   const saved = { id: 7, firstname: 'Ada', lastname: 'Okafor', email: 'ada@example.com', role: 'user' };
   const usersRepository = {
     findOneBy: jest.fn().mockResolvedValue(options.exists ? { id: 1 } : null),
+    existsBy: jest.fn().mockResolvedValue(false),
     create: jest.fn((value) => value),
     save: jest.fn().mockResolvedValue(saved),
     delete: jest.fn().mockResolvedValue({ affected: 1 }),
