@@ -342,10 +342,11 @@ export class WalletService {
 
     const transaction = await this.transfer(me, { toUserId: others[0].userId, amount, note, key, conversationId });
     const body = `Sent ${formatNaira(amount)}${note?.trim() ? ` · ${note.trim()}` : ''}`;
-    const message = await this.messages.postPayment(
+    const message = await this.messages.postRich(
       me,
       conversationId,
       `pay:${key}`,
+      'payment',
       { kind: 'payment', transactionId: transaction.id, amount, currency: 'NGN', note: note?.trim() || null },
       body,
     );

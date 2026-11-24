@@ -52,6 +52,11 @@ export function validateEnv(
   if (get('PAYMENTS_PROVIDER') === 'paystack' && !get('PAYSTACK_SECRET_KEY')) {
     problems.push('PAYSTACK_SECRET_KEY is required when PAYMENTS_PROVIDER=paystack');
   }
+  if (get('CALLS_PROVIDER') === 'livekit') {
+    for (const key of ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET']) {
+      if (!get(key)) problems.push(`${key} is required when CALLS_PROVIDER=livekit`);
+    }
+  }
   if (get('REDIS_URL') && !/^rediss?:\/\//.test(get('REDIS_URL'))) {
     problems.push('REDIS_URL must start with redis:// or rediss://');
   }

@@ -66,7 +66,7 @@ export class MessagesService {
     // A payment's details are stored as they are shown. Files get a temporary link.
     const media = row.deletedAt
       ? null
-      : row.type === 'payment'
+      : row.type === 'payment' || row.type === 'call'
         ? row.media
         : await this.mediaFiles.view(row.media as StoredMedia | null);
     return present(row, status, media);
@@ -157,12 +157,13 @@ export class MessagesService {
     return this.publish(me, inserted[0]);
   }
 
-  /** A payment shows up in the chat as a message of its own. It is made by the wallet, never typed. */
-  async postPayment(
+  /** A payment or a call shows up in the chat as a message of its own. The server makes it, nobody types it. */
+  async postRich(
     me: number,
     conversationId: string,
     clientId: string,
-    payment: Record<string, unknown>,
+    type: 'payment' | 'call',
+    details: Record<string, unknown>,
     body: string,
   ) {
     const existing = (await this.db.query(`SELECT * FROM messages WHERE "senderId" = $1 AND "clientId" = $2`, [
@@ -172,9 +173,9 @@ export class MessagesService {
     if (existing[0]) return this.view(existing[0], await this.statusOf(conversationId, me, existing[0].id));
     const inserted = (await this.db.query(
       `INSERT INTO messages ("conversationId", "senderId", type, body, media, "clientId")
-       VALUES ($1, $2, 'payment', $3, $4, $5)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT ("senderId", "clientId") WHERE "clientId" IS NOT NULL DO NOTHING RETURNING *`,
-      [conversationId, me, body, JSON.stringify(payment), clientId],
+      [conversationId, me, type, body, JSON.stringify(details), clientId],
     )) as MessageRow[];
     if (inserted.length === 0) {
       const again = (await this.db.query(`SELECT * FROM messages WHERE "senderId" = $1 AND "clientId" = $2`, [
@@ -313,7 +314,9 @@ export class MessagesService {
 
   async remove(me: number, messageId: number) {
     const row = await this.ownMessage(me, messageId);
-    if (row.type === 'payment') throw new BadRequestException('A payment record cannot be deleted');
+    if (row.type === 'payment' || row.type === 'call') {
+      throw new BadRequestException('A payment or call record cannot be deleted');
+    }
     await this.db.query(`UPDATE messages SET "deletedAt" = now(), body = NULL, media = NULL WHERE id = $1`, [
       messageId,
     ]);

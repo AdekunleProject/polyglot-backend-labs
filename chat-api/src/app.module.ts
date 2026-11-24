@@ -10,6 +10,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ChatModule } from './chat/chat.module';
+import { CallsModule } from './calls/calls.module';
 import { BackupsModule } from './backups/backups.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { LinksModule } from './links/links.module';
@@ -76,6 +77,7 @@ import { validateEnv } from './config/env.validation';
     BackupsModule,
     StatusModule,
     WalletModule,
+    CallsModule,
   ],
   controllers: [AppController],
   providers: [

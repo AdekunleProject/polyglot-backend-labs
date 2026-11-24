@@ -13,6 +13,8 @@ process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret-fedcba9876543210';
 process.env.JWT_EXPIRES_IN = '15m';
 process.env.JWT_REFRESH_EXPIRES_IN = '7d';
 process.env.FRONTEND_URL = '';
+process.env.CALLS_PROVIDER = 'fake';
+process.env.CALL_RING_SECONDS = '2';
 process.env.PAYMENTS_PROVIDER = 'fake';
 process.env.PAYSTACK_SECRET_KEY = 'sk_test_e2e_secret';
 // Many sign-ins from one address in a minute are normal in a test.

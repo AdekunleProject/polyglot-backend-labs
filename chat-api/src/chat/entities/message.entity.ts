@@ -1,6 +1,6 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
-export type MessageType = 'text' | 'image' | 'file' | 'voice' | 'video' | 'system';
+export type MessageType = 'text' | 'image' | 'file' | 'voice' | 'video' | 'system' | 'payment' | 'call';
 
 @Entity('messages')
 export class Message {

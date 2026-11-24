@@ -14,6 +14,8 @@ export function previewOf(message: { type: string; body: string | null }): strin
       return 'Voice message';
     case 'file':
       return 'File';
+    case 'call':
+      return message.body ?? 'Call';
     case 'payment':
       return `Payment: ${message.body ?? ''}`.trim();
     default:

@@ -153,7 +153,7 @@ describe('Chat (integration)', () => {
     await app
       .get<DataSource>(getDataSourceToken())
       .query(
-        'TRUNCATE TABLE ledger_entries, wallet_transactions, wallets, status_views, status_audience, statuses, backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE TABLE call_participants, calls, ledger_entries, wallet_transactions, wallets, status_views, status_audience, statuses, backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
   });
 
@@ -985,6 +985,129 @@ describe('Chat (integration)', () => {
       expect(report.body.walletMismatches).toHaveLength(1);
       await db.query(`UPDATE wallets SET balance = balance - 1 WHERE "userId" = $1`, [cat.id]);
       expect((await http().get('/admin/wallets/reconcile').set(auth(boss))).body.ok).toBe(true);
+    });
+  });
+
+  describe('voice and video calls', () => {
+    let ada: Person;
+    let bob: Person;
+    let cat: Person;
+    let eve: Person;
+    let chatId: string;
+
+    const start = (p: Person, conversationId: string, type = 'audio') =>
+      http().post('/calls').set(auth(p)).send({ conversationId, type });
+    const act = (p: Person, id: string, action: string) => http().post(`/calls/${id}/${action}`).set(auth(p));
+    const lastCallMessage = async (p: Person, conversationId: string) => {
+      const history = await http().get(`/conversations/${conversationId}/messages?limit=10`).set(auth(p));
+      return history.body.items.find((m: { type: string }) => m.type === 'call');
+    };
+    const until = async (check: () => Promise<boolean>) => {
+      for (let i = 0; i < 40; i += 1) {
+        if (await check()) return;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      throw new Error('condition not met in time');
+    };
+
+    beforeAll(async () => {
+      [ada, bob, cat, eve] = [await person('Amaka'), await person('Bayo'), await person('Chidi'), await person('Dara')];
+      chatId = (await http().post('/conversations/direct').set(auth(ada)).send({ userId: bob.id })).body.id;
+    });
+
+    it('rings the other person live, connects on accept, and leaves a record with the length', async () => {
+      const b = await connect(bob);
+      const incoming = waitFor<{ call: { id: string; type: string }; from: { id: number } }>(b, 'call:incoming');
+      const started = await start(ada, chatId, 'video');
+      expect(started.status).toBe(201);
+      expect(started.body.call).toMatchObject({ type: 'video', status: 'ringing', initiatorId: ada.id });
+      expect(started.body.media.url).toBe('wss://livekit.fake.test');
+      expect(started.body.media.token).toBe(`fake.call_${started.body.call.id}.${ada.id}`);
+      const ring = await incoming;
+      expect(ring.call.id).toBe(started.body.call.id);
+      expect(ring.from.id).toBe(ada.id);
+
+      const a = await connect(ada);
+      const accepted = waitFor<{ userId: number }>(a, 'call:accepted');
+      const answer = await act(bob, started.body.call.id, 'accept');
+      expect(answer.status).toBe(200);
+      expect(answer.body.call.status).toBe('active');
+      expect(answer.body.media.token).toContain(`.${bob.id}`);
+      expect((await accepted).userId).toBe(bob.id);
+      expect((await act(bob, started.body.call.id, 'accept')).status).toBe(200);
+
+      await new Promise((r) => setTimeout(r, 1100));
+      await act(bob, started.body.call.id, 'leave').expect(200);
+      const ended = await http().get(`/calls/${started.body.call.id}`).set(auth(ada));
+      expect(ended.body.status).toBe('ended');
+      expect(ended.body.durationSec).toBeGreaterThanOrEqual(1);
+      const record = await lastCallMessage(ada, chatId);
+      expect(record.body).toMatch(/^Video call · 0:0\d$/);
+      expect(record.media).toMatchObject({ kind: 'call', callType: 'video', status: 'ended' });
+      expect((await http().delete(`/messages/${record.id}`).set(auth(ada))).status).toBe(400);
+    });
+
+    it('does not let a stranger see, answer or end a call', async () => {
+      const started = await start(ada, chatId);
+      expect((await start(eve, chatId)).status).toBe(404);
+      expect((await http().get(`/calls/${started.body.call.id}`).set(auth(eve))).status).toBe(404);
+      expect((await act(eve, started.body.call.id, 'accept')).status).toBe(404);
+      expect((await act(bob, started.body.call.id, 'end')).status).toBe(403);
+      expect((await start(ada, chatId)).status).toBe(409);
+      await act(ada, started.body.call.id, 'end').expect(200);
+    });
+
+    it('records a cancelled call when the caller hangs up before an answer', async () => {
+      const started = await start(ada, chatId);
+      await act(ada, started.body.call.id, 'leave').expect(200);
+      expect((await http().get(`/calls/${started.body.call.id}`).set(auth(bob))).body.status).toBe('cancelled');
+      expect((await lastCallMessage(bob, chatId)).body).toBe('Missed voice call');
+      expect((await act(bob, started.body.call.id, 'accept')).status).toBe(409);
+    });
+
+    it('records a declined call', async () => {
+      const started = await start(ada, chatId, 'video');
+      await act(bob, started.body.call.id, 'decline').expect(200);
+      expect((await http().get(`/calls/${started.body.call.id}`).set(auth(ada))).body.status).toBe('declined');
+      expect((await lastCallMessage(ada, chatId)).body).toBe('Declined video call');
+    });
+
+    it('marks a call missed when nobody answers in time', async () => {
+      const started = await start(ada, chatId);
+      await until(async () => (await http().get(`/calls/${started.body.call.id}`).set(auth(ada))).body.status === 'missed');
+      const call = await http().get(`/calls/${started.body.call.id}`).set(auth(bob));
+      expect(call.body.participants.find((p: { userId: number }) => p.userId === bob.id).status).toBe('missed');
+      expect((await lastCallMessage(bob, chatId)).body).toBe('Missed voice call');
+      expect((await act(bob, started.body.call.id, 'accept')).status).toBe(409);
+    });
+
+    it('runs a group call: people join one by one and it ends when the last one leaves', async () => {
+      const group = (await http().post('/conversations/group').set(auth(ada)).send({ title: 'Standup', memberIds: [bob.id, cat.id] })).body.id;
+      const started = await start(ada, group, 'audio');
+      const id = started.body.call.id as string;
+      expect(started.body.call.participants).toHaveLength(3);
+
+      await act(cat, id, 'decline').expect(200);
+      expect((await http().get(`/calls/${id}`).set(auth(ada))).body.status).toBe('ringing');
+      await act(bob, id, 'accept').expect(200);
+      expect((await http().get(`/calls/${id}`).set(auth(ada))).body.status).toBe('active');
+
+      await act(ada, id, 'leave').expect(200);
+      expect((await http().get(`/calls/${id}`).set(auth(bob))).body.status).toBe('active');
+      await act(bob, id, 'leave').expect(200);
+      expect((await http().get(`/calls/${id}`).set(auth(bob))).body.status).toBe('ended');
+      expect((await lastCallMessage(cat, group)).body).toMatch(/^Voice call/);
+    });
+
+    it('lists call history newest first with direction, and pages it', async () => {
+      const page = await http().get('/calls?limit=2').set(auth(ada));
+      expect(page.body.items).toHaveLength(2);
+      expect(page.body.items[0].direction).toBe('outgoing');
+      expect(page.body.nextCursor).toBeTruthy();
+      const next = await http().get(`/calls?limit=2&cursor=${page.body.nextCursor}`).set(auth(ada));
+      expect(next.body.items[0].createdAt <= page.body.items[1].createdAt).toBe(true);
+      expect((await http().get('/calls?cursor=zzz').set(auth(ada))).status).toBe(400);
+      expect((await http().get('/calls').set(auth(eve))).body.items).toEqual([]);
     });
   });
 });
