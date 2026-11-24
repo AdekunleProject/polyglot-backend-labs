@@ -8,6 +8,11 @@ import { Tag } from './tags/entities/tag.entity';
 import { MailToken } from './auth/entities/mail-token.entity';
 import { RecoveryCode } from './auth/entities/recovery-code.entity';
 import { Session } from './auth/entities/session.entity';
+import { Bookmark } from './engagement/entities/bookmark.entity';
+import { Follow } from './engagement/entities/follow.entity';
+import { PostLike } from './engagement/entities/post-like.entity';
+import { Device } from './notifications/entities/device.entity';
+import { Notification } from './notifications/entities/notification.entity';
 import { User } from './users/entities/user.entity';
 
 export default new DataSource({
@@ -18,6 +23,6 @@ export default new DataSource({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   ssl: process.env.DB_SSL === 'true',
-  entities: [User, Post, Tag, Comment, Session, MailToken, RecoveryCode, AuditLog],
+  entities: [User, Post, Tag, Comment, Session, MailToken, RecoveryCode, AuditLog, Device, Notification, PostLike, Bookmark, Follow],
   migrations: [join(__dirname, 'migrations', '*{.ts,.js}')],
 });

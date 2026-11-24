@@ -69,6 +69,7 @@ interface PostBody {
 interface Tokens {
   accessToken: string;
   refreshToken: string;
+  user: { id: number };
 }
 
 describe('Blog API (integration)', () => {
@@ -773,6 +774,121 @@ describe('Blog API (integration)', () => {
         .post('/auth/2fa/login')
         .send({ email: 'a@e2e.test', challengeToken: 'nope', code: '123456' });
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('mobile app features', () => {
+    it('pages the feed with a cursor, without repeats or gaps', async () => {
+      const author = await signUp();
+      const made: number[] = [];
+      for (let i = 0; i < 5; i += 1) made.push((await publishedPost(author.accessToken)).id);
+
+      const seen: number[] = [];
+      let cursor: string | null | undefined;
+      for (let page = 0; page < 20; page += 1) {
+        const res = await http().get('/feed').query({ limit: 2, ...(cursor ? { cursor } : {}) });
+        expect(res.status).toBe(200);
+        seen.push(...(res.body.items as { id: number }[]).map((p) => p.id));
+        cursor = res.body.nextCursor;
+        if (!cursor) break;
+      }
+      expect(new Set(seen).size).toBe(seen.length);
+      expect(seen).toEqual([...seen].sort((a, b) => b - a));
+      for (const id of made) expect(seen).toContain(id);
+      expect((await http().get('/feed').query({ cursor: 'garbage' })).status).toBe(400);
+    });
+
+    it('likes once, counts, tells the author once, and unlikes', async () => {
+      const author = await signUp();
+      const fan = await signUp();
+      const post = await publishedPost(author.accessToken);
+
+      const first = await http().post(`/posts/${post.id}/like`).set(bearer(fan.accessToken));
+      const second = await http().post(`/posts/${post.id}/like`).set(bearer(fan.accessToken));
+      expect(first.body).toEqual({ liked: true, likeCount: 1 });
+      expect(second.body.likeCount).toBe(1);
+
+      const inbox = await http().get('/notifications').set(bearer(author.accessToken));
+      expect((inbox.body.items as { type: string }[]).filter((n) => n.type === 'like')).toHaveLength(1);
+
+      const card = (await http().get('/feed').query({ limit: 50 })).body.items.find((p: { id: number }) => p.id === post.id);
+      expect(card.likeCount).toBe(1);
+      const states = await http().post('/feed/states').set(bearer(fan.accessToken)).send({ postIds: [post.id] });
+      expect(states.body[post.id]).toEqual({ liked: true, bookmarked: false });
+
+      expect((await http().delete(`/posts/${post.id}/like`).set(bearer(fan.accessToken))).body.likeCount).toBe(0);
+      expect((await http().post(`/posts/${post.id}/like`)).status).toBe(401);
+      expect((await http().post('/posts/999999/like').set(bearer(fan.accessToken))).status).toBe(404);
+    });
+
+    it('notifies the author of a comment, counts unread and marks read', async () => {
+      const author = await signUp();
+      const reader = await signUp();
+      const post = await publishedPost(author.accessToken);
+      await http().post(`/posts/${post.id}/comments`).set(bearer(reader.accessToken)).send({ content: 'Nice one' });
+      // Commenting on your own post tells nobody.
+      await http().post(`/posts/${post.id}/comments`).set(bearer(author.accessToken)).send({ content: 'Thanks' });
+
+      const count = await http().get('/notifications/unread-count').set(bearer(author.accessToken));
+      expect(count.body.unread).toBe(1);
+      const inbox = await http().get('/notifications').set(bearer(author.accessToken));
+      const item = inbox.body.items[0] as { id: number; type: string; data: { slug: string } };
+      expect(item.type).toBe('comment');
+      expect(item.data.slug).toBe(post.slug);
+
+      expect((await http().patch(`/notifications/${item.id}/read`).set(bearer(author.accessToken))).status).toBe(200);
+      expect((await http().get('/notifications/unread-count').set(bearer(author.accessToken))).body.unread).toBe(0);
+      // Someone else's notification cannot be touched.
+      expect((await http().patch(`/notifications/${item.id}/read`).set(bearer(reader.accessToken))).status).toBe(404);
+    });
+
+    it('saves and removes bookmarks', async () => {
+      const author = await signUp();
+      const reader = await signUp();
+      const post = await publishedPost(author.accessToken);
+      expect((await http().post(`/posts/${post.id}/bookmark`).set(bearer(reader.accessToken))).body).toEqual({ bookmarked: true });
+      const saved = await http().get('/bookmarks').set(bearer(reader.accessToken));
+      expect((saved.body.items as { id: number }[]).map((p) => p.id)).toEqual([post.id]);
+      await http().delete(`/posts/${post.id}/bookmark`).set(bearer(reader.accessToken));
+      expect((await http().get('/bookmarks').set(bearer(reader.accessToken))).body.items).toEqual([]);
+    });
+
+    it('follows people, shows a following feed and a profile, and refuses self-follow', async () => {
+      const author = await signUp();
+      const fan = await signUp();
+      const stranger = await signUp();
+      const mine = await publishedPost(author.accessToken);
+      await publishedPost(stranger.accessToken);
+
+      expect((await http().post(`/users/${author.user.id}/follow`).set(bearer(fan.accessToken))).status).toBe(200);
+      expect((await http().post(`/users/${fan.user.id}/follow`).set(bearer(fan.accessToken))).status).toBe(400);
+      expect((await http().post('/users/999999/follow').set(bearer(fan.accessToken))).status).toBe(404);
+
+      const feed = await http().get('/feed/following').set(bearer(fan.accessToken));
+      expect((feed.body.items as { id: number }[]).map((p) => p.id)).toEqual([mine.id]);
+
+      const profile = await http().get(`/profiles/${author.user.id}/me`).set(bearer(fan.accessToken));
+      expect(profile.body).toMatchObject({ followerCount: 1, followedByMe: true, postCount: 1 });
+      expect(profile.body.email).toBeUndefined();
+
+      const note = await http().get('/notifications').set(bearer(author.accessToken));
+      expect((note.body.items as { type: string }[]).some((n) => n.type === 'follow')).toBe(true);
+      await http().delete(`/users/${author.user.id}/follow`).set(bearer(fan.accessToken));
+      expect((await http().get('/feed/following').set(bearer(fan.accessToken))).body.items).toEqual([]);
+    });
+
+    it('registers a push token, moves it to the next account on the same phone, and removes it', async () => {
+      const a = await signUp();
+      const b = await signUp();
+      const token = `ExponentPushToken[test-${Date.now()}]`;
+      expect(
+        (await http().post('/devices').set(bearer(a.accessToken)).send({ token, platform: 'android' })).status,
+      ).toBe(200);
+      expect(
+        (await http().post('/devices').set(bearer(b.accessToken)).send({ token, platform: 'android' })).status,
+      ).toBe(200);
+      expect((await http().post('/devices').set(bearer(a.accessToken)).send({ token, platform: 'toaster' })).status).toBe(400);
+      expect((await http().delete('/devices').set(bearer(b.accessToken)).send({ token })).status).toBe(200);
     });
   });
 

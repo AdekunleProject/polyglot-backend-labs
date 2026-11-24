@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/auth-user.type';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { Post } from '../posts/entities/post.entity';
 import { CreateCommentDto } from './dto/create-comment.dto';
@@ -22,6 +23,7 @@ export class CommentsService {
     @InjectRepository(Post)
     private readonly postsRepository: Repository<Post>,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async requirePublishedPost(postId: number) {
@@ -34,13 +36,26 @@ export class CommentsService {
   }
 
   async create(postId: number, dto: CreateCommentDto, user: AuthUser) {
-    await this.requirePublishedPost(postId);
+    const post = await this.requirePublishedPost(postId);
     const comment = this.commentsRepository.create({
       content: dto.content,
       post: { id: postId },
       author: { id: user.id },
     });
-    return this.commentsRepository.save(comment);
+    const saved = await this.commentsRepository.save(comment);
+    // Tell the post's author, unless they commented on their own post.
+    const authorId = (await this.postsRepository.findOne({
+      where: { id: postId },
+      relations: { author: true },
+    }))?.author.id;
+    if (authorId && authorId !== user.id) {
+      await this.notifications.notify(authorId, 'comment', 'New comment on your post', dto.content, {
+        postId,
+        slug: post.slug,
+        commentId: saved.id,
+      });
+    }
+    return saved;
   }
 
   async findForPost(postId: number, page = 1, limit = 10) {

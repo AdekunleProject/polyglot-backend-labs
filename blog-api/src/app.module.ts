@@ -14,6 +14,8 @@ import { UsersModule } from './users/users.module';
 import { PostsModule } from './posts/posts.module';
 import { validateEnv } from './config/env.validation';
 import { CommentsModule } from './comments/comments.module';
+import { EngagementModule } from './engagement/engagement.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { ReportsModule } from './reports/reports.module';
 
 @Module({
@@ -64,6 +66,8 @@ import { ReportsModule } from './reports/reports.module';
     PostsModule,
     CommentsModule,
     ReportsModule,
+    NotificationsModule,
+    EngagementModule,
   ],
   controllers: [AppController],
   providers: [
