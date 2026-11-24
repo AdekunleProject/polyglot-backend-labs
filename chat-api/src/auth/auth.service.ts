@@ -159,6 +159,18 @@ export class AuthService {
     return this.issueTokens(user, deviceName);
   }
 
+  /** Same rule as a password login: an account with 2FA must also give its authenticator code. */
+  async signInOrChallenge(user: User, deviceName?: string) {
+    if (user.twoFactorEnabled) {
+      return {
+        twoFactorRequired: true as const,
+        challengeToken: await this.twoFactor.createChallenge(user),
+        message: 'Enter the code from your authenticator app at POST /auth/2fa/login.',
+      };
+    }
+    return this.issueTokens(user, deviceName);
+  }
+
   // Creates, stores (hashed) and emails a code. Any older code for the same
   // purpose stops working.
   private async sendCode(user: User, purpose: MailTokenPurpose) {

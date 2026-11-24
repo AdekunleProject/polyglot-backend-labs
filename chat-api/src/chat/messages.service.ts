@@ -9,6 +9,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PushService } from '../devices/push.service';
 import { decodeCursor, encodeCursor } from '../common/cursor';
+import { rowsOf } from '../common/rows-of';
 import { ConversationsService } from './conversations.service';
 import type { MediaKind } from './media-rules';
 import { MediaService, StoredMedia } from './media.service';
@@ -30,17 +31,6 @@ interface MessageRow {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
-}
-
-/**
- * TypeORM answers UPDATE ... RETURNING with [rows, affectedCount], but an
- * INSERT ... RETURNING or a SELECT with just the rows. This accepts both.
- */
-export function rowsOf<T>(result: unknown): T[] {
-  if (Array.isArray(result) && result.length === 2 && Array.isArray(result[0]) && typeof result[1] === 'number') {
-    return result[0] as T[];
-  }
-  return result as T[];
 }
 
 export function present(row: MessageRow, status?: Status, media: unknown = null) {

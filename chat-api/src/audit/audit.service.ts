@@ -14,6 +14,11 @@ export type AuditAction =
   | 'user.view_messages'
   | 'user.block'
   | 'user.report'
+  | 'auth.device_link'
+  | 'auth.phone_login'
+  | 'auth.phone_add'
+  | 'contact.scan'
+  | 'contact.qr_reset'
   | 'chat.remove_message'
   | 'chat.remove_member';
 

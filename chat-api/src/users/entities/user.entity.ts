@@ -41,6 +41,17 @@ export class User {
   @Column({ type: 'varchar', length: 30, nullable: true })
   phoneNumber: string | null;
 
+  // Set once a code sent by SMS was typed back. Only a verified number can sign in.
+  @Column({ type: 'timestamptz', nullable: true })
+  phoneVerifiedAt: Date | null;
+
+  // Bumped to make every printed or shared QR code of this person stop working.
+  @Column({ type: 'int', default: 0 })
+  qrVersion: number;
+
+  @Column({ default: true })
+  qrEnabled: boolean;
+
   @Column({ type: 'date', nullable: true })
   dateOfBirth: string | null;
 

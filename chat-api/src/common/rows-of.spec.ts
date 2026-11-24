@@ -1,4 +1,4 @@
-import { rowsOf } from './messages.service';
+import { rowsOf } from './rows-of';
 
 describe('rowsOf', () => {
   it('unwraps the [rows, count] answer of an UPDATE ... RETURNING', () => {

@@ -12,6 +12,7 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { FileUpload } from '../src/aws/aws.file-upload';
 import { MailService } from '../src/mail/mail.service';
+import { SmsService } from '../src/phone/sms.service';
 
 const PASSWORD = 'Passw0rd-e2e!';
 
@@ -26,6 +27,23 @@ class FakeMail {
     const match = /code is ([A-Z0-9]{6})/.exec(message?.text ?? '');
     if (!match) throw new Error(`No code was mailed to ${to}`);
     return match[1];
+  }
+}
+
+class FakeSms {
+  sent: { to: string; text: string }[] = [];
+  async send(to: string, text: string) {
+    this.sent.push({ to, text });
+    return true;
+  }
+  lastCode(to: string) {
+    const message = [...this.sent].reverse().find((m) => m.to === to);
+    const match = /is (\d{6})/.exec(message?.text ?? '');
+    if (!match) throw new Error(`No code was texted to ${to}`);
+    return match[1];
+  }
+  count(to: string) {
+    return this.sent.filter((m) => m.to === to).length;
   }
 }
 
@@ -62,6 +80,7 @@ describe('Chat (integration)', () => {
   let port: number;
   const mail = new FakeMail();
   const files = new FakeFiles();
+  const sms = new FakeSms();
   const sockets: Socket[] = [];
   let counter = 0;
 
@@ -113,6 +132,8 @@ describe('Chat (integration)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(MailService)
       .useValue(mail)
+      .overrideProvider(SmsService)
+      .useValue(sms)
       .overrideProvider(FileUpload)
       .useValue(files)
       .compile();
@@ -124,7 +145,7 @@ describe('Chat (integration)', () => {
     await app
       .get<DataSource>(getDataSourceToken())
       .query(
-        'TRUNCATE TABLE messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE TABLE phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
   });
 
@@ -452,6 +473,143 @@ describe('Chat (integration)', () => {
       expect(res.body.count).toBeGreaterThanOrEqual(1);
       expect((await http().get('/auth/me').set(auth(laptop))).status).toBe(401);
       expect((await http().get('/auth/me').set(auth(phone))).status).toBe(200);
+    });
+  });
+
+  describe('phone number sign-in', () => {
+    let ada: Person;
+    const NUMBER = '0803 111 2222';
+    const E164 = '+2348031112222';
+
+    beforeAll(async () => {
+      ada = await person('Pelu');
+    });
+
+    it('verifies a number with an SMS code, normalised to one spelling', async () => {
+      expect((await http().post('/phone/add').set(auth(ada)).send({ phoneNumber: 'abc' })).status).toBe(400);
+      await http().post('/phone/add').set(auth(ada)).send({ phoneNumber: NUMBER }).expect(200);
+      const wrong = await http().post('/phone/confirm').set(auth(ada)).send({ phoneNumber: NUMBER, code: '000000' });
+      expect(wrong.status).toBe(400);
+      const ok = await http().post('/phone/confirm').set(auth(ada)).send({ phoneNumber: NUMBER, code: sms.lastCode(E164) });
+      expect(ok.status).toBe(200);
+      expect(ok.body.phoneNumber).toBe(E164);
+    });
+
+    it('does not let a second account claim a verified number', async () => {
+      const other = await person('Quin');
+      expect((await http().post('/phone/add').set(auth(other)).send({ phoneNumber: E164 })).status).toBe(409);
+    });
+
+    it('answers the same for a known and an unknown number, and texts only the known one', async () => {
+      const known = await http().post('/auth/phone/request').send({ phoneNumber: E164 });
+      const unknown = await http().post('/auth/phone/request').send({ phoneNumber: '+2348099999999' });
+      expect(known.status).toBe(200);
+      expect(unknown.body).toEqual(known.body);
+      expect(sms.count('+2348099999999')).toBe(0);
+      expect(sms.count(E164)).toBeGreaterThanOrEqual(2);
+    });
+
+    it('signs in with the code once, and a wrong code or reuse is refused', async () => {
+      const code = sms.lastCode(E164);
+      const bad = await http().post('/auth/phone/verify').send({ phoneNumber: E164, code: code === '111111' ? '222222' : '111111' });
+      expect(bad.status).toBe(401);
+      const good = await http().post('/auth/phone/verify').send({ phoneNumber: NUMBER, code, deviceName: 'Chrome on Windows' });
+      expect(good.status).toBe(200);
+      expect(good.body.user.id).toBe(ada.id);
+      expect((await http().get('/auth/me').set({ Authorization: `Bearer ${good.body.accessToken}` })).status).toBe(200);
+      expect((await http().post('/auth/phone/verify').send({ phoneNumber: E164, code })).status).toBe(401);
+      const sessions = await http().get('/auth/sessions').set(auth(ada));
+      expect(sessions.body.some((x: { deviceName: string }) => x.deviceName === 'Chrome on Windows')).toBe(true);
+    });
+
+    it('asks for a new code before another is sent, and locks a code after 5 wrong guesses', async () => {
+      await http().post('/auth/phone/request').send({ phoneNumber: E164 }).expect(200);
+      const before = sms.count(E164);
+      await http().post('/auth/phone/request').send({ phoneNumber: E164 }).expect(200);
+      expect(sms.count(E164)).toBe(before);
+
+      const target = await person('Ruth');
+      await http().post('/phone/add').set(auth(target)).send({ phoneNumber: '+2348033333333' }).expect(200);
+      const real = sms.lastCode('+2348033333333');
+      const wrong = real === '123456' ? '654321' : '123456';
+      for (let i = 0; i < 5; i += 1) {
+        await http().post('/phone/confirm').set(auth(target)).send({ phoneNumber: '+2348033333333', code: wrong });
+      }
+      const late = await http().post('/phone/confirm').set(auth(target)).send({ phoneNumber: '+2348033333333', code: real });
+      expect(late.status).toBe(400);
+    });
+  });
+
+  describe('link a laptop with a QR code', () => {
+    let phone: Person;
+
+    beforeAll(async () => {
+      phone = await person('Seyi');
+    });
+
+    it('shows the device, waits for approval, then hands the laptop its own session once', async () => {
+      const start = await http().post('/auth/link/start').send({ deviceName: 'Seyi laptop' });
+      expect(start.status).toBe(200);
+      const { linkId, secret } = start.body;
+
+      expect((await http().post('/auth/link/poll').send({ linkId, secret })).body.status).toBe('pending');
+      expect((await http().post('/auth/link/poll').send({ linkId, secret: 'wrong' })).status).toBe(410);
+
+      const seen = await http().post('/auth/link/inspect').set(auth(phone)).send({ linkId, secret });
+      expect(seen.body.deviceName).toBe('Seyi laptop');
+      await http().post('/auth/link/approve').set(auth(phone)).send({ linkId, secret }).expect(200);
+
+      const done = await http().post('/auth/link/poll').send({ linkId, secret });
+      expect(done.body.status).toBe('approved');
+      expect(done.body.user.id).toBe(phone.id);
+      const laptop = { Authorization: `Bearer ${done.body.accessToken}` };
+      expect((await http().get('/auth/me').set(laptop)).status).toBe(200);
+      expect((await http().post('/auth/link/poll').send({ linkId, secret })).status).toBe(410);
+
+      const sessions = await http().get('/auth/sessions').set(auth(phone));
+      expect(sessions.body.some((x: { deviceName: string }) => x.deviceName === 'Seyi laptop')).toBe(true);
+    });
+
+    it('does not sign anyone in when the phone denies, or without a signed-in phone', async () => {
+      const { linkId, secret } = (await http().post('/auth/link/start').send({ deviceName: 'Stranger PC' })).body;
+      expect((await http().post('/auth/link/approve').send({ linkId, secret })).status).toBe(401);
+      await http().post('/auth/link/deny').set(auth(phone)).send({ linkId, secret }).expect(200);
+      expect((await http().post('/auth/link/poll').send({ linkId, secret })).body.status).toBe('denied');
+      expect((await http().post('/auth/link/approve').set(auth(phone)).send({ linkId, secret })).status).toBe(410);
+    });
+  });
+
+  describe('add a person by QR code', () => {
+    let ada: Person;
+    let bob: Person;
+
+    beforeAll(async () => {
+      [ada, bob] = [await person('Tari'), await person('Uche')];
+    });
+
+    it('scanning opens the chat, and your own code is refused', async () => {
+      const code = (await http().get('/contacts/qr').set(auth(ada))).body.payload as string;
+      expect(code.startsWith('chatqr:')).toBe(true);
+      const scan = await http().post('/contacts/scan').set(auth(bob)).send({ code });
+      expect(scan.status).toBe(200);
+      expect(scan.body.user.id).toBe(ada.id);
+      expect(scan.body.conversation.type).toBe('direct');
+      expect((await http().post('/contacts/scan').set(auth(ada)).send({ code })).status).toBe(400);
+    });
+
+    it('refuses garbage and a login token pretending to be a QR code', async () => {
+      expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: 'chatqr:nope' })).status).toBe(404);
+      expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: `chatqr:${ada.token}` })).status).toBe(404);
+      expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: 'hello' })).status).toBe(404);
+    });
+
+    it('stops old codes working after a reset, and when scanning is switched off', async () => {
+      const old = (await http().get('/contacts/qr').set(auth(ada))).body.payload as string;
+      const fresh = (await http().post('/contacts/qr/reset').set(auth(ada))).body.payload as string;
+      expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: old })).status).toBe(404);
+      expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: fresh })).status).toBe(200);
+      await http().patch('/contacts/qr').set(auth(ada)).send({ enabled: false }).expect(200);
+      expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: fresh })).status).toBe(404);
     });
   });
 });

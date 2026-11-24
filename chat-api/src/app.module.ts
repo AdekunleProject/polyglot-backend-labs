@@ -10,6 +10,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ChatModule } from './chat/chat.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { LinksModule } from './links/links.module';
+import { PhoneModule } from './phone/phone.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { DevicesModule } from './devices/devices.module';
 import { AuthModule } from './auth/auth.module';
@@ -64,6 +67,9 @@ import { validateEnv } from './config/env.validation';
     RealtimeModule,
     DevicesModule,
     ChatModule,
+    ContactsModule,
+    LinksModule,
+    PhoneModule,
   ],
   controllers: [AppController],
   providers: [
