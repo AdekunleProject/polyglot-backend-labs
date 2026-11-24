@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -88,6 +89,35 @@ export class FileUpload {
       await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
     } catch (error) {
       this.logger.warn(`Could not delete ${key}: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * A link the phone uploads to directly, so large videos never pass through
+   * the API. It is valid for 15 minutes and only accepts this exact type and size.
+   */
+  async createUploadUrl(key: string, contentType: string, size: number): Promise<string> {
+    const { s3, bucket } = this.storage();
+    return getSignedUrl(
+      s3,
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ContentType: contentType,
+        ContentLength: size,
+      }),
+      { expiresIn: 900 },
+    );
+  }
+
+  /** The stored object's size, or null when nothing was uploaded under that key. */
+  async headFile(key: string): Promise<{ size: number } | null> {
+    const { s3, bucket } = this.storage();
+    try {
+      const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      return { size: Number(head.ContentLength ?? 0) };
+    } catch {
+      return null;
     }
   }
 }

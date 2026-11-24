@@ -10,6 +10,8 @@ import { DataSource } from 'typeorm';
 import { PushService } from '../devices/push.service';
 import { decodeCursor, encodeCursor } from '../common/cursor';
 import { ConversationsService } from './conversations.service';
+import type { MediaKind } from './media-rules';
+import { MediaService, StoredMedia } from './media.service';
 import { previewOf } from './direct-key';
 import { RealtimeService } from './realtime.service';
 import type { SendMessageDto } from './dto/chat.dto';
@@ -30,7 +32,7 @@ interface MessageRow {
   deletedAt: Date | null;
 }
 
-export function present(row: MessageRow, status?: Status) {
+export function present(row: MessageRow, status?: Status, media: unknown = null) {
   const deleted = !!row.deletedAt;
   return {
     id: row.id,
@@ -39,7 +41,7 @@ export function present(row: MessageRow, status?: Status) {
     type: row.type,
     body: deleted ? null : row.body,
     replyToId: row.replyToId,
-    media: deleted ? null : row.media,
+    media: deleted ? null : media,
     clientId: row.clientId,
     createdAt: row.createdAt,
     editedAt: row.editedAt,
@@ -56,7 +58,13 @@ export class MessagesService {
     private readonly realtime: RealtimeService,
     private readonly push: PushService,
     private readonly config: ConfigService,
+    private readonly mediaFiles: MediaService,
   ) {}
+
+  private async view(row: MessageRow, status?: Status) {
+    const media = row.deletedAt ? null : await this.mediaFiles.view(row.media as StoredMedia | null);
+    return present(row, status, media);
+  }
 
   private get editWindowMs() {
     const minutes = Number(this.config.get('MESSAGE_EDIT_MINUTES'));
@@ -81,12 +89,30 @@ export class MessagesService {
 
   async send(me: number, dto: SendMessageDto) {
     await this.conversations.requireMember(dto.conversationId, me);
-    const type = dto.type ?? 'text';
-    const body = dto.body?.trim();
-    if (type !== 'text') {
-      throw new BadRequestException('Voice, image and file messages are sent with an upload');
+
+    // A retry of a message we already have: hand back the original, send nothing twice.
+    const existing = (await this.db.query(
+      `SELECT * FROM messages WHERE "senderId" = $1 AND "clientId" = $2`,
+      [me, dto.clientId],
+    )) as MessageRow[];
+    if (existing[0]) {
+      if (existing[0].conversationId !== dto.conversationId) {
+        throw new BadRequestException('That clientId was already used');
+      }
+      const status = await this.statusOf(dto.conversationId, me, existing[0].id);
+      return { ...(await this.view(existing[0], status)), duplicate: true };
     }
-    if (!body) throw new BadRequestException('A message cannot be empty');
+
+    const type = dto.type ?? 'text';
+    const body = dto.body?.trim() || null;
+    let media: StoredMedia | null = null;
+    if (type === 'text') {
+      if (!body) throw new BadRequestException('A message cannot be empty');
+      if (dto.mediaId) throw new BadRequestException('A text message has no attachment');
+    } else {
+      if (!dto.mediaId) throw new BadRequestException(`A ${type} message needs a mediaId`);
+      media = await this.mediaFiles.claim(me, dto.conversationId, dto.mediaId, type as MediaKind);
+    }
 
     if (dto.replyToId) {
       const reply = (await this.db.query(
@@ -97,23 +123,28 @@ export class MessagesService {
     }
 
     const inserted = (await this.db.query(
-      `INSERT INTO messages ("conversationId", "senderId", type, body, "replyToId", "clientId")
-       VALUES ($1, $2, 'text', $3, $4, $5)
+      `INSERT INTO messages ("conversationId", "senderId", type, body, "replyToId", media, "clientId")
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT ("senderId", "clientId") WHERE "clientId" IS NOT NULL DO NOTHING
        RETURNING *`,
-      [dto.conversationId, me, body, dto.replyToId ?? null, dto.clientId],
+      [
+        dto.conversationId,
+        me,
+        type,
+        body,
+        dto.replyToId ?? null,
+        media ? JSON.stringify(media) : null,
+        dto.clientId,
+      ],
     )) as MessageRow[];
 
     if (inserted.length === 0) {
-      // A retry of a message we already have: hand back the original, send nothing twice.
-      const existing = (await this.db.query(
+      // Lost a race with the same retry arriving twice at once.
+      const again = (await this.db.query(
         `SELECT * FROM messages WHERE "senderId" = $1 AND "clientId" = $2`,
         [me, dto.clientId],
       )) as MessageRow[];
-      if (existing[0].conversationId !== dto.conversationId) {
-        throw new BadRequestException('That clientId was already used');
-      }
-      return { ...present(existing[0], await this.statusOf(dto.conversationId, me, existing[0].id)), duplicate: true };
+      return { ...(await this.view(again[0], await this.statusOf(dto.conversationId, me, again[0].id))), duplicate: true };
     }
 
     const row = inserted[0];
@@ -129,7 +160,8 @@ export class MessagesService {
       [row.conversationId, me, row.id],
     );
 
-    const message = present(row, 'sent');
+    if (media) await this.mediaFiles.attach(media.id, row.id);
+    const message = await this.view(row, 'sent');
     const memberIds = await this.conversations.memberIds(row.conversationId);
     this.realtime.emitToUsers(memberIds, 'message:new', message);
     void this.notifyOffline(me, row, memberIds);
@@ -194,16 +226,18 @@ export class MessagesService {
     const delivered = others[0]?.d ?? 0;
 
     return {
-      items: page.map((row) =>
-        present(
-          row,
-          row.senderId === me
-            ? row.id <= read
-              ? 'read'
-              : row.id <= delivered
-                ? 'delivered'
-                : 'sent'
-            : undefined,
+      items: await Promise.all(
+        page.map((row) =>
+          this.view(
+            row,
+            row.senderId === me
+              ? row.id <= read
+                ? 'read'
+                : row.id <= delivered
+                  ? 'delivered'
+                  : 'sent'
+              : undefined,
+          ),
         ),
       ),
       nextCursor: rows.length > limit ? encodeCursor(page[page.length - 1].id) : null,
@@ -233,7 +267,7 @@ export class MessagesService {
       `UPDATE messages SET body = $2, "editedAt" = now() WHERE id = $1 RETURNING *`,
       [messageId, body.trim()],
     )) as MessageRow[];
-    const message = present(updated[0]);
+    const message = await this.view(updated[0]);
     this.realtime.emitToUsers(await this.conversations.memberIds(row.conversationId), 'message:updated', message);
     return message;
   }
@@ -243,6 +277,7 @@ export class MessagesService {
     await this.db.query(`UPDATE messages SET "deletedAt" = now(), body = NULL, media = NULL WHERE id = $1`, [
       messageId,
     ]);
+    await this.mediaFiles.discard(row.media as StoredMedia | null);
     this.realtime.emitToUsers(await this.conversations.memberIds(row.conversationId), 'message:deleted', {
       id: messageId,
       conversationId: row.conversationId,

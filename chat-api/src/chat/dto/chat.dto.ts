@@ -72,6 +72,11 @@ export class SendMessageDto {
   @MaxLength(4000)
   body?: string;
 
+  // For image, file, voice and video: the id returned by POST /media/uploads.
+  @IsOptional()
+  @IsUUID()
+  mediaId?: string;
+
   @IsOptional()
   @IsInt()
   replyToId?: number;
@@ -84,17 +89,71 @@ export class SendMessageBodyDto {
   clientId: string;
 
   @IsOptional()
-  @IsIn(['text'])
-  type?: 'text';
+  @IsIn(['text', 'image', 'file', 'voice', 'video'])
+  type?: 'text' | 'image' | 'file' | 'voice' | 'video';
 
+  // The text, or the caption of a photo or video.
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(4000)
-  body: string;
+  body?: string;
+
+  @IsOptional()
+  @IsUUID()
+  mediaId?: string;
 
   @IsOptional()
   @IsInt()
   replyToId?: number;
+}
+
+export class CreateUploadDto {
+  @IsUUID()
+  conversationId: string;
+
+  @IsIn(['image', 'file', 'voice', 'video'])
+  kind: 'image' | 'file' | 'voice' | 'video';
+
+  @IsString()
+  @MaxLength(100)
+  contentType: string;
+
+  @IsInt()
+  @Min(1)
+  size: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  filename?: string;
+
+  // Voice notes and videos: how long it plays.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(4 * 60 * 60 * 1000)
+  durationMs?: number;
+
+  // Voice notes: up to 100 bars (0-255) for drawing the waveform.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(255, { each: true })
+  waveform?: number[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20000)
+  width?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20000)
+  height?: number;
 }
 
 export class EditMessageDto {

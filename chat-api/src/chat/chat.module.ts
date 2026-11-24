@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { AwsModule } from '../aws/aws.module';
 import { DevicesModule } from '../devices/devices.module';
 import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
 import { ConversationsService } from './conversations.service';
+import { MediaController } from './media.controller';
+import { MediaService } from './media.service';
 import { MessagesService } from './messages.service';
 import { RealtimeService } from './realtime.service';
 import { Conversation } from './entities/conversation.entity';
@@ -16,14 +19,15 @@ import { TypeOrmModule } from '@nestjs/typeorm';
   imports: [
     TypeOrmModule.forFeature([Conversation, ConversationMember, Message]),
     DevicesModule,
+    AwsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({ secret: config.getOrThrow<string>('JWT_SECRET') }),
     }),
   ],
-  controllers: [ChatController],
-  providers: [ChatGateway, ConversationsService, MessagesService, RealtimeService],
+  controllers: [ChatController, MediaController],
+  providers: [ChatGateway, ConversationsService, MessagesService, MediaService, RealtimeService],
   exports: [RealtimeService, ConversationsService],
 })
 export class ChatModule {}

@@ -29,6 +29,28 @@ class FakeMail {
   }
 }
 
+class FakeFiles {
+  stored = new Map<string, number>();
+  deleted: string[] = [];
+  async createUploadUrl(key: string) {
+    return `https://files.test/upload/${key}`;
+  }
+  async headFile(key: string) {
+    return this.stored.has(key) ? { size: this.stored.get(key)! } : null;
+  }
+  async getDownloadUrl(key: string) {
+    return `https://files.test/get/${key}`;
+  }
+  async deleteFile(key: string) {
+    this.deleted.push(key);
+    this.stored.delete(key);
+  }
+  /** Pretend the phone finished uploading to the pre-signed link. */
+  finish(uploadUrl: string, size: number) {
+    this.stored.set(uploadUrl.replace('https://files.test/upload/', ''), size);
+  }
+}
+
 interface Person {
   id: number;
   token: string;
@@ -39,6 +61,7 @@ describe('Chat (integration)', () => {
   let app: INestApplication;
   let port: number;
   const mail = new FakeMail();
+  const files = new FakeFiles();
   const sockets: Socket[] = [];
   let counter = 0;
 
@@ -91,7 +114,7 @@ describe('Chat (integration)', () => {
       .overrideProvider(MailService)
       .useValue(mail)
       .overrideProvider(FileUpload)
-      .useValue({})
+      .useValue(files)
       .compile();
     app = moduleRef.createNestApplication();
     configureApp(app);
@@ -306,6 +329,97 @@ describe('Chat (integration)', () => {
       const offline = waitFor<{ userId: number; online: boolean }>(l, 'presence');
       k.disconnect();
       expect(await offline).toMatchObject({ userId: kemi.id, online: false });
+    });
+  });
+
+  describe('media', () => {
+    let ada: Person;
+    let bob: Person;
+    let eve: Person;
+    let chatId: string;
+
+    beforeAll(async () => {
+      [ada, bob, eve] = [await person('Mia'), await person('Ned'), await person('Orla')];
+      chatId = (await http().post('/conversations/direct').set(auth(ada)).send({ userId: bob.id })).body.id;
+    });
+
+    const upload = (p: Person, body: Record<string, unknown>) =>
+      http().post('/media/uploads').set(auth(p)).send({ conversationId: chatId, ...body });
+
+    it('sends a voice note: ask for a link, upload, then send with the mediaId', async () => {
+      const res = await upload(ada, {
+        kind: 'voice',
+        contentType: 'audio/mp4',
+        size: 48_000,
+        durationMs: 7300,
+        waveform: [3, 40, 90, 20],
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.uploadUrl).toContain('/chat/');
+      expect(res.body.mediaId).toBeTruthy();
+
+      const early = await http().post(`/conversations/${chatId}/messages`).set(auth(ada)).send({
+        clientId: 'v-early', type: 'voice', mediaId: res.body.mediaId,
+      });
+      expect(early.status).toBe(400);
+
+      files.finish(res.body.uploadUrl, 48_000);
+      const sent = await http().post(`/conversations/${chatId}/messages`).set(auth(ada)).send({
+        clientId: 'v-1', type: 'voice', mediaId: res.body.mediaId,
+      });
+      expect(sent.status).toBe(201);
+      expect(sent.body.media).toMatchObject({ kind: 'voice', durationMs: 7300, waveform: [3, 40, 90, 20] });
+      expect(sent.body.media.url).toContain('https://files.test/get/');
+      expect(sent.body.media).not.toHaveProperty('key');
+
+      const retry = await http().post(`/conversations/${chatId}/messages`).set(auth(ada)).send({
+        clientId: 'v-1', type: 'voice', mediaId: res.body.mediaId,
+      });
+      expect(retry.body.id).toBe(sent.body.id);
+
+      const history = await http().get(`/conversations/${chatId}/messages?limit=1`).set(auth(bob));
+      expect(history.body.items[0].media.url).toBeTruthy();
+      const list = await http().get('/conversations').set(auth(bob));
+      expect(list.body[0].lastMessage.preview).toBe('Voice message');
+    });
+
+    it('sends a video with a caption and removes the file when the message is deleted', async () => {
+      const res = await upload(ada, { kind: 'video', contentType: 'video/mp4', size: 5_000_000, durationMs: 30000, width: 1280, height: 720 });
+      files.finish(res.body.uploadUrl, 5_000_000);
+      const sent = await http().post(`/conversations/${chatId}/messages`).set(auth(ada)).send({
+        clientId: 'vid-1', type: 'video', mediaId: res.body.mediaId, body: 'look at this',
+      });
+      expect(sent.body.body).toBe('look at this');
+      await http().delete(`/messages/${sent.body.id}`).set(auth(ada)).expect(200);
+      expect(files.deleted.some((k) => k.endsWith('.mp4'))).toBe(true);
+    });
+
+    it('refuses wrong types, oversize files, empty voice notes and strangers', async () => {
+      expect((await upload(ada, { kind: 'file', contentType: 'application/x-msdownload', size: 1000 })).status).toBe(400);
+      expect((await upload(ada, { kind: 'image', contentType: 'image/png', size: 11 * 1024 * 1024 })).status).toBe(400);
+      expect((await upload(ada, { kind: 'voice', contentType: 'audio/mp4', size: 1000 })).status).toBe(400);
+      expect((await upload(ada, { kind: 'voice', contentType: 'audio/mp4', size: 1000, durationMs: 901_000 })).status).toBe(400);
+      expect((await upload(eve, { kind: 'image', contentType: 'image/png', size: 1000 })).status).toBe(404);
+    });
+
+    it('does not let someone send another person\'s upload, a wrong kind, or a used one twice', async () => {
+      const res = await upload(ada, { kind: 'image', contentType: 'image/png', size: 2000 });
+      files.finish(res.body.uploadUrl, 2000);
+      const send = (p: Person, clientId: string, type: string) =>
+        http().post(`/conversations/${chatId}/messages`).set(auth(p)).send({ clientId, type, mediaId: res.body.mediaId });
+      expect((await send(bob, 'x-1', 'image')).status).toBe(400);
+      expect((await send(ada, 'x-2', 'file')).status).toBe(400);
+      expect((await send(ada, 'x-3', 'image')).status).toBe(201);
+      expect((await send(ada, 'x-4', 'image')).status).toBe(400);
+    });
+
+    it('refuses a file larger than the size that was declared', async () => {
+      const res = await upload(ada, { kind: 'file', contentType: 'application/pdf', size: 1000 });
+      files.finish(res.body.uploadUrl, 999_999);
+      const sent = await http().post(`/conversations/${chatId}/messages`).set(auth(ada)).send({
+        clientId: 'big-1', type: 'file', mediaId: res.body.mediaId,
+      });
+      expect(sent.status).toBe(400);
     });
   });
 });
