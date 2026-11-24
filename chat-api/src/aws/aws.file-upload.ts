@@ -120,4 +120,10 @@ export class FileUpload {
       return null;
     }
   }
+
+  /** Stores bytes the server made itself (a backup archive). Returns nothing, throws on failure. */
+  async putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+    const { s3, bucket } = this.storage();
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+  }
 }

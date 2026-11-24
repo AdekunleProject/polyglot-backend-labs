@@ -11,6 +11,7 @@ import { io, Socket } from 'socket.io-client';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { FileUpload } from '../src/aws/aws.file-upload';
+import { decryptBackup } from '../src/backups/backup-crypto';
 import { MailService } from '../src/mail/mail.service';
 import { SmsService } from '../src/phone/sms.service';
 
@@ -49,7 +50,11 @@ class FakeSms {
 
 class FakeFiles {
   stored = new Map<string, number>();
+  objects = new Map<string, Buffer>();
   deleted: string[] = [];
+  async putObject(key: string, body: Buffer) {
+    this.objects.set(key, body);
+  }
   async createUploadUrl(key: string) {
     return `https://files.test/upload/${key}`;
   }
@@ -62,6 +67,7 @@ class FakeFiles {
   async deleteFile(key: string) {
     this.deleted.push(key);
     this.stored.delete(key);
+    this.objects.delete(key);
   }
   /** Pretend the phone finished uploading to the pre-signed link. */
   finish(uploadUrl: string, size: number) {
@@ -145,7 +151,7 @@ describe('Chat (integration)', () => {
     await app
       .get<DataSource>(getDataSourceToken())
       .query(
-        'TRUNCATE TABLE phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE TABLE backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
   });
 
@@ -610,6 +616,79 @@ describe('Chat (integration)', () => {
       expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: fresh })).status).toBe(200);
       await http().patch('/contacts/qr').set(auth(ada)).send({ enabled: false }).expect(200);
       expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: fresh })).status).toBe(404);
+    });
+  });
+
+  describe('backups', () => {
+    let ada: Person;
+    let bob: Person;
+    let eve: Person;
+    let chatId: string;
+
+    async function ready(p: Person, id: string) {
+      for (let i = 0; i < 60; i += 1) {
+        const res = await http().get(`/backups/${id}`).set(auth(p));
+        if (res.body.status !== 'pending') return res;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      throw new Error('backup did not finish');
+    }
+
+    beforeAll(async () => {
+      [ada, bob, eve] = [await person('Wale'), await person('Xena'), await person('Yemi')];
+      chatId = (await http().post('/conversations/direct').set(auth(ada)).send({ userId: bob.id })).body.id;
+      await http().post(`/conversations/${chatId}/messages`).set(auth(ada)).send({ clientId: 'bk-1', body: 'backup-me-please' });
+      const doomed = await http().post(`/conversations/${chatId}/messages`).set(auth(bob)).send({ clientId: 'bk-2', body: 'delete-me' });
+      await http().delete(`/messages/${doomed.body.id}`).set(auth(bob)).expect(200);
+    });
+
+    it('refuses a short password', async () => {
+      expect((await http().post('/backups').set(auth(ada)).send({ password: 'short' })).status).toBe(400);
+    });
+
+    it('makes an encrypted archive that only the password opens, without deleted messages', async () => {
+      const started = await http().post('/backups').set(auth(ada)).send({ password: 'my-backup-password' });
+      expect(started.status).toBe(202);
+      const done = await ready(ada, started.body.id);
+      expect(done.body.status).toBe('ready');
+      expect(done.body.downloadUrl).toContain('https://files.test/get/backups/');
+      expect(done.body.messageCount).toBeGreaterThanOrEqual(1);
+
+      const key = [...files.objects.keys()].find((k) => k.includes(started.body.id))!;
+      const archive = files.objects.get(key)!;
+      expect(archive.includes('backup-me-please')).toBe(false);
+      expect(() => decryptBackup(archive, 'not-the-password')).toThrow();
+
+      const data = decryptBackup<{ conversations: { id: string; messages: { body: string }[] }[]; user: { id: number } }>(
+        archive,
+        'my-backup-password',
+      );
+      expect(data.user.id).toBe(ada.id);
+      const chat = data.conversations.find((c) => c.id === chatId)!;
+      const bodies = chat.messages.map((m) => m.body);
+      expect(bodies).toContain('backup-me-please');
+      expect(bodies).not.toContain('delete-me');
+    });
+
+    it('keeps one running backup at a time and lists only your own', async () => {
+      const first = await http().post('/backups').set(auth(bob)).send({ password: 'another-password' });
+      const second = await http().post('/backups').set(auth(bob)).send({ password: 'another-password' });
+      expect(first.status).toBe(202);
+      expect([202, 409]).toContain(second.status);
+      await ready(bob, first.body.id);
+      const mine = await http().get('/backups').set(auth(bob));
+      expect(mine.body.length).toBeGreaterThanOrEqual(1);
+      expect((await http().get('/backups').set(auth(eve))).body).toEqual([]);
+    });
+
+    it('hides a backup from other people and removes the file when deleted', async () => {
+      const started = await http().post('/backups').set(auth(eve)).send({ password: 'eve-password-1' });
+      await ready(eve, started.body.id);
+      expect((await http().get(`/backups/${started.body.id}`).set(auth(ada))).status).toBe(404);
+      expect((await http().delete(`/backups/${started.body.id}`).set(auth(ada))).status).toBe(404);
+      await http().delete(`/backups/${started.body.id}`).set(auth(eve)).expect(200);
+      expect([...files.objects.keys()].some((k) => k.includes(started.body.id))).toBe(false);
+      expect((await http().get(`/backups/${started.body.id}`).set(auth(eve))).status).toBe(404);
     });
   });
 });
