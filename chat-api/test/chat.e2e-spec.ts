@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { createHmac } from 'crypto';
 import request from 'supertest';
 import { io, Socket } from 'socket.io-client';
 import { AppModule } from '../src/app.module';
@@ -144,7 +145,7 @@ describe('Chat (integration)', () => {
       .overrideProvider(FileUpload)
       .useValue(files)
       .compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ rawBody: true });
     configureApp(app);
     await app.init();
     await app.listen(0);
@@ -152,7 +153,7 @@ describe('Chat (integration)', () => {
     await app
       .get<DataSource>(getDataSourceToken())
       .query(
-        'TRUNCATE TABLE status_views, status_audience, statuses, backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE TABLE ledger_entries, wallet_transactions, wallets, status_views, status_audience, statuses, backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
   });
 
@@ -796,6 +797,194 @@ describe('Chat (integration)', () => {
       const left = (await db.query(`SELECT 1 FROM statuses WHERE id = $1`, [made.body.id])) as unknown[];
       expect(left).toHaveLength(0);
       expect(files.deleted.some((k) => k.endsWith('.jpg'))).toBe(true);
+    });
+  });
+
+  describe('wallet and payments', () => {
+    const SECRET = 'sk_test_e2e_secret';
+    let ada: Person;
+    let bob: Person;
+    let cat: Person;
+    let boss: Person;
+    let chatId: string;
+    let firstTransferId: number;
+
+    const balance = async (p: Person) => (await http().get('/wallet').set(auth(p))).body.balance as number;
+    const sign = (raw: string) => createHmac('sha512', SECRET).update(raw).digest('hex');
+    const webhook = (payload: unknown, signature?: string) => {
+      const raw = JSON.stringify(payload);
+      const req = http().post('/payments/webhook/paystack').set('Content-Type', 'application/json');
+      if (signature !== null) req.set('x-paystack-signature', signature ?? sign(raw));
+      return req.send(raw);
+    };
+    const charge = (reference: string, amount: number, currency = 'NGN') => ({
+      event: 'charge.success',
+      data: { reference, amount, currency },
+    });
+    const transfer = (p: Person, to: Person, amount: number, key: string, note?: string) =>
+      http().post('/wallet/transfer').set(auth(p)).send({ toUserId: to.id, amount, idempotencyKey: key, note });
+
+    beforeAll(async () => {
+      [ada, bob, cat, boss] = [await person('Wuraola'), await person('Xavier'), await person('Yetunde'), await person('Zainab')];
+      await app.get<DataSource>(getDataSourceToken()).query(`UPDATE users SET role = 'admin' WHERE id = $1`, [boss.id]);
+      chatId = (await http().post('/conversations/direct').set(auth(ada)).send({ userId: bob.id })).body.id;
+    });
+
+    it('starts with an empty wallet and refuses a top-up below the minimum', async () => {
+      const wallet = await http().get('/wallet').set(auth(ada));
+      expect(wallet.body).toMatchObject({ balance: 0, currency: 'NGN', frozen: false });
+      expect((await http().post('/wallet/fund').set(auth(ada)).send({ amount: 500 })).status).toBe(400);
+      expect((await http().post('/wallet/fund').set(auth(ada)).send({ amount: 1.5 })).status).toBe(400);
+    });
+
+    it('credits a top-up only after a correctly signed webhook, and only once', async () => {
+      const wrongAmount = await http().post('/wallet/fund').set(auth(ada)).send({ amount: 20000 });
+      expect(wrongAmount.body.authorizationUrl).toContain('/checkout/');
+      const fund = await http().post('/wallet/fund').set(auth(ada)).send({ amount: 500000 });
+      const ref = fund.body.reference as string;
+
+      expect((await http().get(`/wallet/fund/${ref}`).set(auth(ada))).body.status).toBe('pending');
+      expect(await balance(ada)).toBe(0);
+
+      expect((await webhook(charge(ref, 500000), 'bad-signature')).status).toBe(401);
+      expect((await webhook(charge(ref, 500000), null as unknown as string)).status).toBe(401);
+      expect(await balance(ada)).toBe(0);
+
+      await webhook(charge(wrongAmount.body.reference, 1)).expect(200);
+      expect(await balance(ada)).toBe(0);
+
+      await webhook(charge(ref, 500000)).expect(200);
+      await webhook(charge(ref, 500000)).expect(200);
+      expect(await balance(ada)).toBe(500000);
+      expect((await http().get(`/wallet/fund/${ref}`).set(auth(ada))).body.status).toBe('success');
+      expect((await http().get(`/wallet/fund/${ref}`).set(auth(bob))).status).toBe(404);
+    });
+
+    it('sends money once per idempotency key and keeps both balances right', async () => {
+      const sent = await transfer(ada, bob, 150000, 'k1', 'rent share');
+      expect(sent.status).toBe(201);
+      firstTransferId = sent.body.id;
+      expect(await balance(ada)).toBe(350000);
+      expect(await balance(bob)).toBe(150000);
+
+      const retry = await transfer(ada, bob, 150000, 'k1');
+      expect(retry.body.id).toBe(firstTransferId);
+      expect(await balance(ada)).toBe(350000);
+      expect((await transfer(ada, bob, 160000, 'k1')).status).toBe(409);
+    });
+
+    it('refuses overspending, tiny amounts, paying yourself and unknown people', async () => {
+      expect((await transfer(ada, bob, 90_000_000, 'big')).status).toBe(400);
+      expect((await transfer(ada, bob, 50, 'tiny')).status).toBe(400);
+      expect((await transfer(ada, ada, 1000, 'self')).status).toBe(400);
+      expect((await http().post('/wallet/transfer').set(auth(ada)).send({ toUserId: 999999, amount: 1000, idempotencyKey: 'ghost' })).status).toBe(404);
+      expect(await balance(ada)).toBe(350000);
+    });
+
+    it('applies the daily sending limit', async () => {
+      const db = app.get<DataSource>(getDataSourceToken());
+      await db.query(
+        `INSERT INTO wallet_transactions (reference, type, status, amount, "fromUserId", "toUserId", "completedAt")
+         VALUES ('limit-probe', 'transfer', 'success', 99950000, $1, $2, now())`,
+        [ada.id, cat.id],
+      );
+      const over = await transfer(ada, bob, 100000, 'daily-1');
+      expect(over.status).toBe(400);
+      expect(over.body.message).toMatch(/Daily sending limit/);
+      await db.query(`DELETE FROM wallet_transactions WHERE reference = 'limit-probe'`);
+      expect((await transfer(ada, bob, 5000, 'daily-2')).status).toBe(201);
+    });
+
+    it('pays inside a one-to-one chat: one payment message, safe to retry, cannot be deleted', async () => {
+      const before = await balance(bob);
+      const pay = await http().post(`/wallet/chats/${chatId}/pay`).set(auth(ada)).send({ amount: 20000, note: 'lunch', idempotencyKey: 'p1' });
+      expect(pay.status).toBe(201);
+      expect(pay.body.message.type).toBe('payment');
+      expect(pay.body.message.media).toMatchObject({ kind: 'payment', amount: 20000, currency: 'NGN' });
+      expect(pay.body.message.body).toContain('₦200.00');
+
+      const again = await http().post(`/wallet/chats/${chatId}/pay`).set(auth(ada)).send({ amount: 20000, note: 'lunch', idempotencyKey: 'p1' });
+      expect(again.body.message.id).toBe(pay.body.message.id);
+      expect(await balance(bob)).toBe(before + 20000);
+
+      const history = await http().get(`/conversations/${chatId}/messages?limit=20`).set(auth(bob));
+      expect(history.body.items.filter((m: { type: string }) => m.type === 'payment')).toHaveLength(1);
+      expect((await http().get('/conversations').set(auth(bob))).body[0].lastMessage.preview).toContain('₦200.00');
+      expect((await http().delete(`/messages/${pay.body.message.id}`).set(auth(ada))).status).toBe(400);
+
+      expect((await http().post(`/wallet/chats/${chatId}/pay`).set(auth(cat)).send({ amount: 1000, idempotencyKey: 'p2' })).status).toBe(404);
+      const group = await http().post('/conversations/group').set(auth(ada)).send({ title: 'Trip', memberIds: [bob.id, cat.id] });
+      expect((await http().post(`/wallet/chats/${group.body.id}/pay`).set(auth(ada)).send({ amount: 1000, idempotencyKey: 'p3' })).status).toBe(400);
+    });
+
+    it('pays someone by scanning their QR code', async () => {
+      const code = (await http().get('/contacts/qr').set(auth(bob))).body.payload as string;
+      const who = await http().post('/wallet/pay-qr/resolve').set(auth(ada)).send({ code });
+      expect(who.body.id).toBe(bob.id);
+
+      const before = await balance(bob);
+      const paid = await http().post('/wallet/pay-qr').set(auth(ada)).send({ code, amount: 10000, idempotencyKey: 'q1' });
+      expect(paid.status).toBe(201);
+      expect(paid.body.payee.id).toBe(bob.id);
+      expect(await balance(bob)).toBe(before + 10000);
+
+      expect((await http().post('/wallet/pay-qr').set(auth(bob)).send({ code, amount: 1000, idempotencyKey: 'q2' })).status).toBe(400);
+      expect((await http().post('/wallet/pay-qr').set(auth(ada)).send({ code: 'chatqr:nope', amount: 1000, idempotencyKey: 'q3' })).status).toBe(404);
+    });
+
+    it('lists history newest first with the other person, and pages it', async () => {
+      const page = await http().get('/wallet/transactions?limit=3').set(auth(ada));
+      expect(page.body.items).toHaveLength(3);
+      expect(page.body.items[0].direction).toBe('out');
+      expect(page.body.items[0].counterparty.username).toBeTruthy();
+      expect(page.body.nextCursor).toBeTruthy();
+      const next = await http().get(`/wallet/transactions?limit=3&cursor=${page.body.nextCursor}`).set(auth(ada));
+      expect(next.body.items[0].id).toBeLessThan(page.body.items[2].id);
+      expect((await http().get('/wallet/transactions?cursor=zzz').set(auth(ada))).status).toBe(400);
+    });
+
+    it('lets only an admin freeze a wallet, and a frozen wallet cannot send or receive', async () => {
+      expect((await http().post(`/admin/wallets/${ada.id}/freeze`).set(auth(bob)).send({ reason: 'suspicious activity' })).status).toBe(403);
+      expect((await http().post(`/admin/wallets/${ada.id}/freeze`).set(auth(boss)).send({ reason: 'x' })).status).toBe(400);
+      await http().post(`/admin/wallets/${ada.id}/freeze`).set(auth(boss)).send({ reason: 'suspicious activity' }).expect(200);
+
+      expect((await http().get('/wallet').set(auth(ada))).body.frozen).toBe(true);
+      expect((await transfer(ada, bob, 1000, 'f1')).status).toBe(403);
+      expect((await transfer(bob, ada, 1000, 'f2')).status).toBe(403);
+
+      await http().post(`/admin/wallets/${ada.id}/unfreeze`).set(auth(boss)).send({ reason: 'checked, all fine' }).expect(200);
+      expect((await transfer(ada, bob, 1000, 'f3')).status).toBe(201);
+    });
+
+    it('reverses a payment once, and not when the receiver already spent it', async () => {
+      const reversal = await http().post(`/admin/wallets/transactions/${firstTransferId}/reverse`).set(auth(boss)).send({ reason: 'sent by mistake' });
+      expect(reversal.status).toBe(200);
+      expect(reversal.body.type).toBe('reversal');
+      expect((await http().post(`/admin/wallets/transactions/${firstTransferId}/reverse`).set(auth(boss)).send({ reason: 'again please' })).status).toBe(409);
+      expect((await http().post(`/admin/wallets/transactions/${firstTransferId}/reverse`).set(auth(bob)).send({ reason: 'give it back' })).status).toBe(403);
+
+      const small = await transfer(ada, bob, 5000, 'r2');
+      await transfer(bob, cat, await balance(bob), 'spend-it').expect(201);
+      expect((await http().post(`/admin/wallets/transactions/${small.body.id}/reverse`).set(auth(boss)).send({ reason: 'sent by mistake' })).status).toBe(409);
+      expect((await http().post('/admin/wallets/transactions/999999/reverse').set(auth(boss)).send({ reason: 'does not exist' })).status).toBe(404);
+    });
+
+    it('proves the books balance: every wallet equals its ledger, every entry pair sums to zero', async () => {
+      expect((await http().get('/admin/wallets/reconcile').set(auth(bob))).status).toBe(403);
+      const report = await http().get('/admin/wallets/reconcile').set(auth(boss));
+      expect(report.status).toBe(200);
+      expect(report.body).toMatchObject({ ok: true, walletMismatches: [], unbalancedTransactions: [] });
+      expect(report.body.totals.inWallets).toBe(report.body.totals.fundedFromOutside);
+    });
+
+    it('detects a wallet that was changed behind the ledger', async () => {
+      const db = app.get<DataSource>(getDataSourceToken());
+      await db.query(`UPDATE wallets SET balance = balance + 1 WHERE "userId" = $1`, [cat.id]);
+      const report = await http().get('/admin/wallets/reconcile').set(auth(boss));
+      expect(report.body.ok).toBe(false);
+      expect(report.body.walletMismatches).toHaveLength(1);
+      await db.query(`UPDATE wallets SET balance = balance - 1 WHERE "userId" = $1`, [cat.id]);
+      expect((await http().get('/admin/wallets/reconcile').set(auth(boss))).body.ok).toBe(true);
     });
   });
 });

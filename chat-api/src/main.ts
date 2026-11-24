@@ -4,7 +4,7 @@ import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Lets Kubernetes stop the pod cleanly: in-flight requests finish and the
   // database connection closes before the process exits.

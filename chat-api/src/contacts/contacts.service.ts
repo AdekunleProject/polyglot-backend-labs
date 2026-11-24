@@ -47,8 +47,8 @@ export class ContactsService {
     return { enabled };
   }
 
-  /** Scanning someone's code opens (or finds) the chat with them. */
-  async scan(me: number, code: string) {
+  /** Who a code belongs to, if it is a live code of somebody else. Used to scan and to pay. */
+  async resolve(me: number, code: string) {
     const invalid = new NotFoundException('Invalid or expired code');
     if (!code.startsWith(PREFIX)) throw invalid;
     let payload: { sub: number; qv: number; type: string };
@@ -68,9 +68,14 @@ export class ContactsService {
       ),
     );
     if (!rows[0]) throw invalid;
+    return rows[0];
+  }
 
-    const conversation = await this.conversations.createDirect(me, rows[0].id);
-    await this.audit.record(me, 'contact.scan', rows[0].id);
-    return { user: rows[0], conversation };
+  /** Scanning someone's code opens (or finds) the chat with them. */
+  async scan(me: number, code: string) {
+    const user = await this.resolve(me, code);
+    const conversation = await this.conversations.createDirect(me, user.id);
+    await this.audit.record(me, 'contact.scan', user.id);
+    return { user, conversation };
   }
 }

@@ -13,6 +13,7 @@ import { ChatModule } from './chat/chat.module';
 import { BackupsModule } from './backups/backups.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { LinksModule } from './links/links.module';
+import { WalletModule } from './wallet/wallet.module';
 import { StatusModule } from './status/status.module';
 import { PhoneModule } from './phone/phone.module';
 import { RealtimeModule } from './realtime/realtime.module';
@@ -74,6 +75,7 @@ import { validateEnv } from './config/env.validation';
     PhoneModule,
     BackupsModule,
     StatusModule,
+    WalletModule,
   ],
   controllers: [AppController],
   providers: [

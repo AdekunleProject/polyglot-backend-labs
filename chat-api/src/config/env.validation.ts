@@ -49,6 +49,9 @@ export function validateEnv(
   if (google.some((key) => get(key)) && !google.every((key) => get(key))) {
     problems.push(`${google.join(', ')} must all be set to enable Google sign-in`);
   }
+  if (get('PAYMENTS_PROVIDER') === 'paystack' && !get('PAYSTACK_SECRET_KEY')) {
+    problems.push('PAYSTACK_SECRET_KEY is required when PAYMENTS_PROVIDER=paystack');
+  }
   if (get('REDIS_URL') && !/^rediss?:\/\//.test(get('REDIS_URL'))) {
     problems.push('REDIS_URL must start with redis:// or rediss://');
   }
