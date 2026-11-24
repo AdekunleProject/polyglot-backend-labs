@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
+import { Session } from './entities/session.entity';
 import { restrictionFor } from './access-restriction';
 import { AuthUser } from './auth-user.type';
 
@@ -15,6 +16,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(Session) private readonly sessions: Repository<Session>,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -34,7 +36,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * a demotion, a deactivation or a deletion takes effect at once instead of
    * when the 15 minute token runs out.
    */
-  async validate(payload: { sub: number }): Promise<AuthUser> {
+  async validate(payload: { sub: number; sid?: string }): Promise<AuthUser> {
     const user = await this.users.findOne({
       where: { id: payload.sub },
       select: {
@@ -50,10 +52,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user || !user.isActive || user.deletedAt) {
       throw new UnauthorizedException();
     }
+    // A device that was signed out stops working at once, not when its
+    // 15 minute token runs out.
+    if (payload.sid) {
+      const live = await this.sessions.existsBy({ id: payload.sid, userId: user.id });
+      if (!live) throw new UnauthorizedException();
+    }
     return {
       id: user.id,
       email: user.email,
       role: user.role,
+      sid: payload.sid,
       restriction: restrictionFor(user, this.requireAdminTwoFactor),
     };
   }

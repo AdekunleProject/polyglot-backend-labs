@@ -13,7 +13,7 @@ import { ConversationsService } from './conversations.service';
 import type { MediaKind } from './media-rules';
 import { MediaService, StoredMedia } from './media.service';
 import { previewOf } from './direct-key';
-import { RealtimeService } from './realtime.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import type { SendMessageDto } from './dto/chat.dto';
 
 type Status = 'sent' | 'delivered' | 'read';

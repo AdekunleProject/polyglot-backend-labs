@@ -24,4 +24,9 @@ export class RealtimeService {
   disconnectUser(userId: number) {
     this.server?.in(`user:${userId}`).disconnectSockets(true);
   }
+
+  /** Closes the live connection of one signed-in device. */
+  disconnectSession(sessionId: string) {
+    this.server?.in(`session:${sessionId}`).disconnectSockets(true);
+  }
 }

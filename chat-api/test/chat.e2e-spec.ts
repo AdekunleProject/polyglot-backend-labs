@@ -422,4 +422,36 @@ describe('Chat (integration)', () => {
       expect(sent.status).toBe(400);
     });
   });
+
+  describe('device sign-out', () => {
+    async function twoDevices() {
+      const phone = await person('Dayo');
+      const email = (await http().get('/auth/me').set(auth(phone))).body.email as string;
+      const second = await http().post('/auth/login').send({ email, password: PASSWORD, deviceName: 'Laptop' });
+      return { phone, laptop: { id: phone.id, token: second.body.accessToken as string, name: 'Dayo' } as Person };
+    }
+
+    it('stops a signed-out device at once and closes its live connection', async () => {
+      const { phone, laptop } = await twoDevices();
+      const socket = await connect(laptop);
+      const closed = new Promise<string>((resolve) => socket.on('disconnect', resolve));
+
+      const sessions = await http().get('/auth/sessions').set(auth(phone));
+      const laptopSession = sessions.body.find((x: { deviceName: string }) => x.deviceName === 'Laptop');
+      await http().delete(`/auth/sessions/${laptopSession.id}`).set(auth(phone)).expect(200);
+
+      expect(await closed).toBeTruthy();
+      expect((await http().get('/auth/me').set(auth(laptop))).status).toBe(401);
+      expect((await http().get('/auth/me').set(auth(phone))).status).toBe(200);
+    });
+
+    it('signs out every other device and keeps the one asking', async () => {
+      const { phone, laptop } = await twoDevices();
+      const res = await http().post('/auth/sessions/revoke-others').set(auth(phone));
+      expect(res.status).toBe(200);
+      expect(res.body.count).toBeGreaterThanOrEqual(1);
+      expect((await http().get('/auth/me').set(auth(laptop))).status).toBe(401);
+      expect((await http().get('/auth/me').set(auth(phone))).status).toBe(200);
+    });
+  });
 });

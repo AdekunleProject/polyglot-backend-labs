@@ -158,6 +158,13 @@ export class AuthController {
     return this.authService.listSessions(user.id);
   }
 
+  @Post('sessions/revoke-others')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  revokeOthers(@CurrentUser() user: AuthUser) {
+    return this.authService.revokeOthers(user.id, user.sid);
+  }
+
   @Delete('sessions/:id')
   @UseGuards(JwtAuthGuard)
   revokeSession(

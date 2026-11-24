@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { directKey, previewOf } from './direct-key';
 import type { MemberRole } from './entities/conversation-member.entity';
-import { RealtimeService } from './realtime.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 interface MemberRow {
   conversationId: string;

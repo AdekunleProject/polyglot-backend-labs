@@ -51,6 +51,6 @@ import { TwoFactorService } from './two-factor/two-factor.service';
         config.get('GOOGLE_CLIENT_ID') ? new GoogleStrategy(config) : null,
     },
   ],
-  exports: [AuthService],
+  exports: [AuthService, TypeOrmModule],
 })
 export class AuthModule {}

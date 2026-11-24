@@ -16,10 +16,11 @@ import type { Server, Socket } from 'socket.io';
 import { ConversationsService } from './conversations.service';
 import { ReceiptDto, SendMessageDto, TypingDto } from './dto/chat.dto';
 import { MessagesService } from './messages.service';
-import { RealtimeService } from './realtime.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 interface SocketData {
   userId: number;
+  sid?: string;
 }
 
 type Ack<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -57,7 +58,15 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       (socket.handshake.auth as { token?: string })?.token ??
       (header?.startsWith('Bearer ') ? header.slice(7) : undefined);
     if (!token) throw new Error('no token');
-    const payload = await this.jwt.verifyAsync<{ sub: number }>(token);
+    const payload = await this.jwt.verifyAsync<{ sub: number; sid?: string }>(token);
+    if (payload.sid) {
+      const live = (await this.db.query(`SELECT 1 FROM sessions WHERE id = $1 AND "userId" = $2`, [
+        payload.sid,
+        payload.sub,
+      ])) as unknown[];
+      if (live.length === 0) throw new Error('signed out');
+    }
+    (socket.data as SocketData).sid = payload.sid;
     const rows = (await this.db.query(
       `SELECT "isActive", "deletedAt", "mustChangePassword" FROM users WHERE id = $1`,
       [payload.sub],
@@ -77,6 +86,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     const me = this.uid(socket);
     const wasOnline = (await this.server.in(`user:${me}`).fetchSockets()).length > 0;
     await socket.join(`user:${me}`);
+    const sid = (socket.data as SocketData).sid;
+    if (sid) await socket.join(`session:${sid}`);
     await this.messages.markAllDelivered(me).catch(() => undefined);
     if (!wasOnline) await this.broadcastPresence(me, true);
   }

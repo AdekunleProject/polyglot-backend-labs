@@ -9,7 +9,6 @@ import { ConversationsService } from './conversations.service';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MessagesService } from './messages.service';
-import { RealtimeService } from './realtime.service';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { Message } from './entities/message.entity';
@@ -27,7 +26,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
     }),
   ],
   controllers: [ChatController, MediaController],
-  providers: [ChatGateway, ConversationsService, MessagesService, MediaService, RealtimeService],
-  exports: [RealtimeService, ConversationsService],
+  providers: [ChatGateway, ConversationsService, MessagesService, MediaService],
+  exports: [ConversationsService],
 })
 export class ChatModule {}

@@ -11,7 +11,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { In, MoreThan, Repository } from 'typeorm';
+import { In, MoreThan, Not, Repository } from 'typeorm';
+import { RealtimeService } from '../realtime/realtime.service';
 import { FileUpload } from '../aws/aws.file-upload';
 import { AuthProvider } from '../common/enums/auth-provider.enum';
 import { ProfileImageProvider } from '../common/enums/profile-image-provider.enum';
@@ -59,6 +60,7 @@ export class AuthService {
     private readonly fileUpload: FileUpload,
     private readonly usersService: UsersService,
     private readonly twoFactor: TwoFactorService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   // Token lifetimes come from the environment.
@@ -72,9 +74,9 @@ export class AuthService {
       '7d') as JwtSignOptions['expiresIn'];
   }
 
-  private signAccessToken(user: Pick<User, 'id' | 'email' | 'role'>) {
+  private signAccessToken(user: Pick<User, 'id' | 'email' | 'role'>, sid: string) {
     return this.jwtService.signAsync(
-      { sub: user.id, email: user.email, role: user.role },
+      { sub: user.id, email: user.email, role: user.role, sid },
       {
         secret: this.config.getOrThrow<string>('JWT_SECRET'),
         expiresIn: this.accessTokenTtl,
@@ -95,7 +97,10 @@ export class AuthService {
 
   // A user can be signed in on several devices. Each has a session row with
   // its own refresh token (stored as a hash). The oldest is dropped past the limit.
-  private async startSession(userId: number, deviceName?: string): Promise<string> {
+  private async startSession(
+    userId: number,
+    deviceName?: string,
+  ): Promise<{ refreshToken: string; sid: string }> {
     const sid = randomUUID();
     const refreshToken = await this.signRefreshToken(userId, sid);
     await this.sessionsRepository.insert({
@@ -113,8 +118,9 @@ export class AuthService {
     const surplus = sessions.slice(MAX_SESSIONS).map((s) => s.id);
     if (surplus.length > 0) {
       await this.sessionsRepository.delete({ id: In(surplus) });
+      surplus.forEach((id) => this.realtime.disconnectSession(id));
     }
-    return refreshToken;
+    return { refreshToken, sid };
   }
 
   private async readRefreshToken(
@@ -140,11 +146,17 @@ export class AuthService {
   }
 
   private async issueTokens(user: User, deviceName?: string) {
+    const { refreshToken, sid } = await this.startSession(user.id, deviceName);
     return {
-      accessToken: await this.signAccessToken(user),
-      refreshToken: await this.startSession(user.id, deviceName),
+      accessToken: await this.signAccessToken(user, sid),
+      refreshToken,
       user: await this.usersService.toPublic(user),
     };
+  }
+
+  /** For sign-in paths that live in other modules (device link, phone code). */
+  signInDevice(user: User, deviceName?: string) {
+    return this.issueTokens(user, deviceName);
   }
 
   // Creates, stores (hashed) and emails a code. Any older code for the same
@@ -362,7 +374,7 @@ export class AuthService {
         'Refresh token was already used. Please sign in again.',
       );
     }
-    return { accessToken: await this.signAccessToken(user), refreshToken };
+    return { accessToken: await this.signAccessToken(user, sid), refreshToken };
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
@@ -455,6 +467,7 @@ export class AuthService {
     });
     // A new password signs the account out everywhere.
     await this.sessionsRepository.delete({ userId: user.id });
+    this.realtime.disconnectUser(user.id);
     return { message: 'Password reset successfully' };
   }
 
@@ -471,7 +484,21 @@ export class AuthService {
   async revokeSession(userId: number, sessionId: string) {
     const result = await this.sessionsRepository.delete({ id: sessionId, userId });
     if (!result.affected) throw new NotFoundException('Session not found');
+    this.realtime.disconnectSession(sessionId);
     return { message: 'Device signed out' };
+  }
+
+  /** "Sign out everywhere else": every device but the one asking. */
+  async revokeOthers(userId: number, currentSid?: string) {
+    const others = await this.sessionsRepository.find({
+      where: currentSid ? { userId, id: Not(currentSid) } : { userId },
+      select: { id: true },
+    });
+    if (others.length > 0) {
+      await this.sessionsRepository.delete({ id: In(others.map((s) => s.id)) });
+      others.forEach((s) => this.realtime.disconnectSession(s.id));
+    }
+    return { message: 'Signed out of other devices', count: others.length };
   }
 
   async logout(userId: number, refreshToken?: string) {
@@ -481,9 +508,11 @@ export class AuthService {
       const parsed = await this.readRefreshToken(refreshToken).catch(() => null);
       if (parsed) {
         await this.sessionsRepository.delete({ id: parsed.sid, userId });
+        this.realtime.disconnectSession(parsed.sid);
       }
     } else {
       await this.sessionsRepository.delete({ userId });
+      this.realtime.disconnectUser(userId);
     }
     return { message: 'Logged out successfully' };
   }
