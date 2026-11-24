@@ -156,9 +156,9 @@ export class StatusService implements OnApplicationBootstrap, OnModuleDestroy {
 
     // Tell the people who can see it, so their app can show a new ring.
     const watchers = (await this.db.query(
-      `SELECT u.id FROM users u JOIN statuses s ON s.id = $2
-       WHERE u.id <> $3 AND u."isActive" = true AND u."deletedAt" IS NULL AND ${VISIBLE_TO_1.replace(/\$1/g, 'u.id')}`,
-      [0, row.id, me],
+      `SELECT u.id FROM users u JOIN statuses s ON s.id = $1
+       WHERE u.id <> $2 AND u."isActive" = true AND u."deletedAt" IS NULL AND ${VISIBLE_TO_1.replace(/\$1/g, 'u.id')}`,
+      [row.id, me],
     )) as { id: number }[];
     this.realtime.emitToUsers(
       watchers.map((w) => w.id),
