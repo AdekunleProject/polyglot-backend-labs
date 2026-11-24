@@ -83,7 +83,7 @@ describe('Chat (integration)', () => {
     expect(reg.status).toBe(201);
     await http().post('/auth/verify-email').send({ email, code: mail.lastCode(email) }).expect(200);
     const login = await http().post('/auth/login').send({ email, password: PASSWORD });
-    expect(login.status).toBe(200);
+    expect(login.status).toBe(201);
     return { id: login.body.user.id, token: login.body.accessToken, name };
   }
 
