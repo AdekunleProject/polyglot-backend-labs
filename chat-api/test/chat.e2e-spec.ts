@@ -1181,7 +1181,7 @@ describe('Chat (integration)', () => {
     const report = (p: Person, body: Record<string, unknown>) => http().post('/reports').set(auth(p)).send(body);
 
     beforeAll(async () => {
-      [ada, bob, cat, eve] = [await person('Hauwa'), await person('Ife'), await person('Jide'), await person('Kemi2')];
+      [ada, bob, cat, eve] = [await person('Hauwa'), await person('Ife'), await person('Jide'), await person('Kelechi')];
       [mgr, boss, sup] = [await person('Mgr'), await person('Boss'), await person('Sup')];
       const db = app.get<DataSource>(getDataSourceToken());
       await db.query(`UPDATE users SET role = 'manager' WHERE id = $1`, [mgr.id]);
