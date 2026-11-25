@@ -29,9 +29,4 @@ export class TwoFactorLoginDto extends TwoFactorCodeDto {
   @IsString()
   @IsNotEmpty()
   challengeToken: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  deviceName?: string;
 }

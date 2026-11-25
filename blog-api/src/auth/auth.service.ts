@@ -4,7 +4,6 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -94,14 +93,13 @@ export class AuthService {
 
   // A user can be signed in on several devices. Each has a session row with
   // its own refresh token (stored as a hash). The oldest is dropped past the limit.
-  private async startSession(userId: number, deviceName?: string): Promise<string> {
+  private async startSession(userId: number): Promise<string> {
     const sid = randomUUID();
     const refreshToken = await this.signRefreshToken(userId, sid);
     await this.sessionsRepository.insert({
       id: sid,
       userId,
       tokenHash: hashToken(refreshToken),
-      deviceName: deviceName?.trim() || null,
     });
 
     const sessions = await this.sessionsRepository.find({
@@ -138,10 +136,10 @@ export class AuthService {
     }
   }
 
-  private async issueTokens(user: User, deviceName?: string) {
+  private async issueTokens(user: User) {
     return {
       accessToken: await this.signAccessToken(user),
-      refreshToken: await this.startSession(user.id, deviceName),
+      refreshToken: await this.startSession(user.id),
       user: await this.usersService.toPublic(user),
     };
   }
@@ -276,7 +274,7 @@ export class AuthService {
           'Enter the code from your authenticator app at POST /auth/2fa/login.',
       };
     }
-    return this.issueTokens(user, dto.deviceName);
+    return this.issueTokens(user);
   }
 
   async loginWithTwoFactor(dto: TwoFactorLoginDto) {
@@ -285,7 +283,7 @@ export class AuthService {
       dto.challengeToken,
       dto.code,
     );
-    return this.issueTokens(user, dto.deviceName);
+    return this.issueTokens(user);
   }
 
   async googleLogin(profile: GoogleProfile) {
@@ -450,22 +448,6 @@ export class AuthService {
     // A new password signs the account out everywhere.
     await this.sessionsRepository.delete({ userId: user.id });
     return { message: 'Password reset successfully' };
-  }
-
-  /** The devices signed in to this account. Never includes the tokens. */
-  async listSessions(userId: number) {
-    return this.sessionsRepository.find({
-      where: { userId },
-      select: { id: true, deviceName: true, createdAt: true, lastUsedAt: true },
-      order: { lastUsedAt: 'DESC' },
-    });
-  }
-
-  /** Signs one device out. Only your own sessions can be found. */
-  async revokeSession(userId: number, sessionId: string) {
-    const result = await this.sessionsRepository.delete({ id: sessionId, userId });
-    if (!result.affected) throw new NotFoundException('Session not found');
-    return { message: 'Device signed out' };
   }
 
   async logout(userId: number, refreshToken?: string) {

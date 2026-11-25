@@ -30,10 +30,6 @@ export class Session {
   @Column({ type: 'varchar', length: 64 })
   tokenHash: string;
 
-  // What the app called the device, for example "Ada's iPhone".
-  @Column({ type: 'varchar', length: 100, nullable: true })
-  deviceName: string | null;
-
   @CreateDateColumn()
   createdAt: Date;
 
