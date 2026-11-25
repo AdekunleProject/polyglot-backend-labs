@@ -153,7 +153,7 @@ describe('Chat (integration)', () => {
     await app
       .get<DataSource>(getDataSourceToken())
       .query(
-        'TRUNCATE TABLE call_participants, calls, ledger_entries, wallet_transactions, wallets, status_views, status_audience, statuses, backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
+        'TRUNCATE TABLE reports, blocks, call_participants, calls, ledger_entries, wallet_transactions, wallets, status_views, status_audience, statuses, backups, phone_codes, device_links, media_uploads, messages, conversation_members, conversations, devices, audit_logs, recovery_codes, mail_tokens, sessions, users RESTART IDENTITY CASCADE',
       );
   });
 
@@ -1108,6 +1108,190 @@ describe('Chat (integration)', () => {
       expect(next.body.items[0].createdAt <= page.body.items[1].createdAt).toBe(true);
       expect((await http().get('/calls?cursor=zzz').set(auth(ada))).status).toBe(400);
       expect((await http().get('/calls').set(auth(eve))).body.items).toEqual([]);
+    });
+  });
+
+  describe('blocking', () => {
+    let ada: Person;
+    let bob: Person;
+    let cat: Person;
+    let chatId: string;
+
+    beforeAll(async () => {
+      [ada, bob, cat] = [await person('Efe'), await person('Femi'), await person('Gbenga')];
+      chatId = (await http().post('/conversations/direct').set(auth(ada)).send({ userId: bob.id })).body.id;
+      await http().post(`/conversations/${chatId}/messages`).set(auth(bob)).send({ clientId: 'bl-1', body: 'hi' }).expect(201);
+    });
+
+    it('stops messages, new chats, calls, payments, QR scans, search and statuses in both directions', async () => {
+      const status = await http().post('/status').set(auth(ada)).send({ type: 'text', body: 'my status' });
+      expect((await http().get('/status/feed').set(auth(bob))).body).toHaveLength(1);
+      const qr = (await http().get('/contacts/qr').set(auth(ada))).body.payload as string;
+      expect((await http().get('/people?q=efe').set(auth(bob))).body.length).toBeGreaterThan(0);
+
+      expect((await http().post('/blocks').set(auth(ada)).send({ userId: ada.id })).status).toBe(400);
+      expect((await http().post('/blocks').set(auth(ada)).send({ userId: 999999 })).status).toBe(404);
+      await http().post('/blocks').set(auth(ada)).send({ userId: bob.id }).expect(200);
+      await http().post('/blocks').set(auth(ada)).send({ userId: bob.id }).expect(200);
+
+      const send = (p: Person, id: string) =>
+        http().post(`/conversations/${chatId}/messages`).set(auth(p)).send({ clientId: id, body: 'hello?' });
+      expect((await send(bob, 'bl-2')).status).toBe(403);
+      expect((await send(ada, 'bl-3')).status).toBe(403);
+      expect((await http().post('/conversations/direct').set(auth(bob)).send({ userId: ada.id })).status).toBe(403);
+      expect((await http().post('/calls').set(auth(bob)).send({ conversationId: chatId, type: 'audio' })).status).toBe(403);
+      expect((await http().post('/wallet/transfer').set(auth(bob)).send({ toUserId: ada.id, amount: 1000, idempotencyKey: 'bl-pay' })).status).toBe(403);
+      expect((await http().post('/contacts/scan').set(auth(bob)).send({ code: qr })).status).toBe(404);
+      expect((await http().get('/people?q=efe').set(auth(bob))).body).toEqual([]);
+      expect((await http().get('/people?q=femi').set(auth(ada))).body).toEqual([]);
+      expect((await http().get('/status/feed').set(auth(bob))).body).toEqual([]);
+      expect((await http().post(`/status/${status.body.id}/view`).set(auth(bob))).status).toBe(404);
+    });
+
+    it('shows only the people you blocked, never who blocked you', async () => {
+      expect((await http().get('/blocks').set(auth(ada))).body.map((u: { id: number }) => u.id)).toEqual([bob.id]);
+      expect((await http().get('/blocks').set(auth(bob))).body).toEqual([]);
+    });
+
+    it('leaves a group you both belong to alone', async () => {
+      const group = (await http().post('/conversations/group').set(auth(cat)).send({ title: 'Mixed', memberIds: [ada.id, bob.id] })).body.id;
+      const sent = await http().post(`/conversations/${group}/messages`).set(auth(bob)).send({ clientId: 'bl-g', body: 'group hello' });
+      expect(sent.status).toBe(201);
+    });
+
+    it('lets messages flow again after unblocking', async () => {
+      await http().delete(`/blocks/${bob.id}`).set(auth(ada)).expect(200);
+      expect((await http().post(`/conversations/${chatId}/messages`).set(auth(bob)).send({ clientId: 'bl-4', body: 'back' })).status).toBe(201);
+      expect((await http().get('/blocks').set(auth(ada))).body).toEqual([]);
+    });
+  });
+
+  describe('reports and moderation', () => {
+    let ada: Person;
+    let bob: Person;
+    let cat: Person;
+    let eve: Person;
+    let mgr: Person;
+    let boss: Person;
+    let sup: Person;
+    let groupId: string;
+    let badMessageId: number;
+    let reportId: number;
+
+    const report = (p: Person, body: Record<string, unknown>) => http().post('/reports').set(auth(p)).send(body);
+
+    beforeAll(async () => {
+      [ada, bob, cat, eve] = [await person('Hauwa'), await person('Ife'), await person('Jide'), await person('Kemi2')];
+      [mgr, boss, sup] = [await person('Mgr'), await person('Boss'), await person('Sup')];
+      const db = app.get<DataSource>(getDataSourceToken());
+      await db.query(`UPDATE users SET role = 'manager' WHERE id = $1`, [mgr.id]);
+      await db.query(`UPDATE users SET role = 'admin' WHERE id = $1`, [boss.id]);
+      await db.query(`UPDATE users SET role = 'superadmin' WHERE id = $1`, [sup.id]);
+      groupId = (await http().post('/conversations/group').set(auth(ada)).send({ title: 'Chat', memberIds: [bob.id, cat.id] })).body.id;
+      await http().post(`/conversations/${groupId}/messages`).set(auth(cat)).send({ clientId: 'rp-0', body: 'earlier line' });
+      badMessageId = (await http().post(`/conversations/${groupId}/messages`).set(auth(bob)).send({ clientId: 'rp-1', body: 'abusive words here' })).body.id;
+    });
+
+    it('needs a real reason, a target the reporter can see, and not yourself', async () => {
+      const base = { targetType: 'message', targetId: badMessageId, category: 'abuse' };
+      expect((await report(ada, { ...base, reason: 'bad' })).status).toBe(400);
+      expect((await report(ada, { ...base, category: 'nonsense', reason: 'this is abusive to me' })).status).toBe(400);
+      expect((await report(eve, { ...base, reason: 'I was not even in that chat' })).status).toBe(404);
+      expect((await report(bob, { ...base, reason: 'reporting my own message' })).status).toBe(400);
+      expect((await report(ada, { targetType: 'user', targetId: 999999, category: 'spam', reason: 'does not exist at all' })).status).toBe(404);
+    });
+
+    it('files a report once, and a second reporter adds another', async () => {
+      const made = await report(ada, { targetType: 'message', targetId: badMessageId, category: 'abuse', reason: 'He insulted me in the group chat' });
+      expect(made.status).toBe(201);
+      expect(made.body.status).toBe('open');
+      reportId = made.body.id;
+      expect((await report(ada, { targetType: 'message', targetId: badMessageId, category: 'abuse', reason: 'sending it a second time' })).status).toBe(409);
+      expect((await report(cat, { targetType: 'message', targetId: badMessageId, category: 'harassment', reason: 'He does this to everyone' })).status).toBe(201);
+      expect((await http().get('/reports/mine').set(auth(ada))).body).toHaveLength(1);
+    });
+
+    it('keeps the queue and the evidence for staff only, and logs who opened private chat content', async () => {
+      expect((await http().get('/reports').set(auth(ada))).status).toBe(403);
+      expect((await http().get(`/reports/${reportId}`).set(auth(ada))).status).toBe(403);
+      const list = await http().get('/reports?status=open').set(auth(mgr));
+      expect(list.status).toBe(200);
+      const row = list.body.items.find((r: { id: number }) => r.id === reportId);
+      expect(row.reportsOnTarget).toBe(2);
+      expect(row.accusedUsername).toBeTruthy();
+
+      const detail = await http().get(`/reports/${reportId}`).set(auth(mgr));
+      expect(detail.body.evidence.message.body).toBe('abusive words here');
+      expect(detail.body.evidence.before.map((m: { body: string }) => m.body)).toContain('earlier line');
+      const db = app.get<DataSource>(getDataSourceToken());
+      const logged = (await db.query(`SELECT 1 FROM audit_logs WHERE action = 'user.view_messages' AND "actorId" = $1`, [mgr.id])) as unknown[];
+      expect(logged.length).toBeGreaterThan(0);
+      expect((await http().get('/reports').set(auth(sup))).status).toBe(200);
+    });
+
+    it('lets a manager check the evidence but only an admin decide', async () => {
+      expect((await http().patch(`/reports/${reportId}/verify`).set(auth(mgr)).send({ valid: true })).status).toBe(400);
+      const verified = await http().patch(`/reports/${reportId}/verify`).set(auth(mgr)).send({ valid: true, note: 'Clear insult in the message' });
+      expect(verified.status).toBe(200);
+      expect(verified.body.status).toBe('reviewed');
+      expect((await http().patch(`/reports/${reportId}/verify`).set(auth(ada)).send({ valid: true, note: 'trying it' })).status).toBe(403);
+
+      const decide = (p: Person, body: Record<string, unknown>) => http().patch(`/reports/${reportId}/decide`).set(auth(p)).send(body);
+      expect((await decide(mgr, { decision: 'remove_content', reason: 'violates the rules' })).status).toBe(403);
+      expect((await decide(sup, { decision: 'remove_content', reason: 'violates the rules' })).status).toBe(403);
+      expect((await decide(boss, { decision: 'remove_content', reason: 'x' })).status).toBe(400);
+    });
+
+    it('removes the message, closes every report on it, tells the reporters and audits it', async () => {
+      const done = await http().patch(`/reports/${reportId}/decide`).set(auth(boss)).send({ decision: 'remove_content', reason: 'Abusive language breaks the rules' });
+      expect(done.status).toBe(200);
+      expect(done.body.status).toBe('actioned');
+
+      const history = await http().get(`/conversations/${groupId}/messages?limit=10`).set(auth(cat));
+      const gone = history.body.items.find((m: { id: number }) => m.id === badMessageId);
+      expect(gone.deleted).toBe(true);
+      expect(gone.body).toBeNull();
+
+      for (const p of [ada, cat]) {
+        const mine = await http().get('/reports/mine').set(auth(p));
+        expect(mine.body[0].status).toBe('actioned');
+        expect(mine.body[0].decisionReason).toContain('Abusive language');
+      }
+      const db = app.get<DataSource>(getDataSourceToken());
+      const logged = (await db.query(`SELECT 1 FROM audit_logs WHERE action = 'report.decide' AND "actorId" = $1`, [boss.id])) as unknown[];
+      expect(logged).toHaveLength(1);
+      expect((await http().patch(`/reports/${reportId}/decide`).set(auth(boss)).send({ decision: 'dismiss', reason: 'second thoughts' })).status).toBe(409);
+    });
+
+    it('suspends a user: their token stops working at once and they cannot sign in', async () => {
+      const made = await report(ada, { targetType: 'user', targetId: bob.id, category: 'harassment', reason: 'He keeps messaging me after I asked him to stop' });
+      expect((await http().patch(`/reports/${made.body.id}/decide`).set(auth(boss)).send({ decision: 'remove_content', reason: 'a person is not content' })).status).toBe(400);
+      const socket = await connect(bob);
+      const closed = new Promise((resolve) => socket.on('disconnect', resolve));
+      expect((await http().patch(`/reports/${made.body.id}/decide`).set(auth(boss)).send({ decision: 'suspend_user', reason: 'Repeated harassment' })).status).toBe(200);
+      await closed;
+      expect((await http().get('/auth/me').set(auth(bob))).status).toBe(401);
+    });
+
+    it('dismisses a report and refuses to suspend someone who outranks the admin', async () => {
+      const dismissed = await report(cat, { targetType: 'user', targetId: ada.id, category: 'spam', reason: 'I think this account is spam' });
+      const out = await http().patch(`/reports/${dismissed.body.id}/decide`).set(auth(boss)).send({ decision: 'dismiss', reason: 'No evidence of spam' });
+      expect(out.body.status).toBe('dismissed');
+      expect((await http().get('/auth/me').set(auth(ada))).status).toBe(200);
+
+      const high = await report(cat, { targetType: 'user', targetId: sup.id, category: 'other', reason: 'testing the limits of the rules' });
+      expect((await http().patch(`/reports/${high.body.id}/decide`).set(auth(boss)).send({ decision: 'suspend_user', reason: 'cannot do this' })).status).toBe(403);
+      expect((await http().get('/auth/me').set(auth(sup))).status).toBe(200);
+      expect((await http().get(`/reports/${high.body.id}`).set(auth(boss))).body.status).toBe('open');
+    });
+
+    it('reports a status and removes it', async () => {
+      await http().post('/conversations/direct').set(auth(cat)).send({ userId: ada.id });
+      const status = await http().post('/status').set(auth(ada)).send({ type: 'text', body: 'nasty post' });
+      const made = await report(cat, { targetType: 'status', targetId: status.body.id, category: 'scam', reason: 'This status tries to scam people' });
+      expect(made.status).toBe(201);
+      await http().patch(`/reports/${made.body.id}/decide`).set(auth(boss)).send({ decision: 'remove_content', reason: 'Scam content' }).expect(200);
+      expect((await http().get('/status/feed').set(auth(cat))).body).toEqual([]);
     });
   });
 });

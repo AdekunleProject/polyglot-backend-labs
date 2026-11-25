@@ -13,6 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
+import { BlocksService } from '../chat/blocks.service';
 import { ConversationsService } from '../chat/conversations.service';
 import { MessagesService } from '../chat/messages.service';
 import { decodeCursor, encodeCursor } from '../common/cursor';
@@ -60,6 +61,7 @@ export class CallsService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly realtime: RealtimeService,
     private readonly push: PushService,
     private readonly config: ConfigService,
+    private readonly blocks: BlocksService,
   ) {}
 
   private get ringSeconds() {
@@ -177,6 +179,7 @@ export class CallsService implements OnApplicationBootstrap, OnModuleDestroy {
     const max = Number(this.config.get('CALL_MAX_PARTICIPANTS')) || 32;
     if (invitees.length + 1 > max) throw new BadRequestException(`A call can have at most ${max} people`);
     if (invitees.length === 0) throw new BadRequestException('There is nobody to call');
+    await this.conversations.assertSendable(conversationId, me);
 
     const id = randomUUID();
     const call = await this.db.transaction(async (tx) => {

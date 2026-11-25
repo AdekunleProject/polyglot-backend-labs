@@ -46,6 +46,8 @@ export class ChatController {
     return this.db.query(
       `SELECT id, username, firstname, lastname FROM users
        WHERE "isActive" = true AND "deletedAt" IS NULL AND id <> $1
+         AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b."blockerId" = $1 AND b."blockedId" = users.id)
+                                                    OR (b."blockerId" = users.id AND b."blockedId" = $1))
          AND (username LIKE $2 OR LOWER(firstname || ' ' || lastname) LIKE $3)
        ORDER BY username LIMIT 20`,
       [user.id, `${term}%`, `%${term}%`],

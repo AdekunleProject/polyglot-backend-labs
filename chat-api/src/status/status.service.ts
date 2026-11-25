@@ -33,8 +33,10 @@ interface StatusRow {
  * Can viewer $1 see status s? Only people who share a direct chat with the
  * poster, narrowed by the poster's choice. Used in every read so no route can forget it.
  */
-const VISIBLE_TO_1 = `
+export const VISIBLE_TO_1 = `
   s."deletedAt" IS NULL AND s."expiresAt" > now() AND s."userId" <> $1
+  AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE (bl."blockerId" = $1 AND bl."blockedId" = s."userId")
+                                              OR (bl."blockerId" = s."userId" AND bl."blockedId" = $1))
   AND EXISTS (
     SELECT 1 FROM conversations c
     JOIN conversation_members a ON a."conversationId" = c.id AND a."userId" = $1 AND a."leftAt" IS NULL

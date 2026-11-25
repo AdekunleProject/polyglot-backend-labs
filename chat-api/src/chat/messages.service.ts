@@ -95,6 +95,7 @@ export class MessagesService {
 
   async send(me: number, dto: SendMessageDto) {
     await this.conversations.requireMember(dto.conversationId, me);
+    await this.conversations.assertSendable(dto.conversationId, me);
 
     // A retry of a message we already have: hand back the original, send nothing twice.
     const existing = (await this.db.query(

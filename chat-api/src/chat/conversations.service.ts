@@ -11,6 +11,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { directKey, previewOf } from './direct-key';
 import type { MemberRole } from './entities/conversation-member.entity';
 import { RealtimeService } from '../realtime/realtime.service';
+import { BlocksService } from './blocks.service';
 
 interface MemberRow {
   conversationId: string;
@@ -26,6 +27,7 @@ export class ConversationsService {
     @InjectDataSource() private readonly db: DataSource,
     private readonly realtime: RealtimeService,
     private readonly config: ConfigService,
+    private readonly blocks: BlocksService,
   ) {}
 
   private get maxMembers() {
@@ -123,6 +125,16 @@ export class ConversationsService {
     };
   }
 
+  /** In a one-to-one chat, nothing may be sent when either person blocked the other. */
+  async assertSendable(conversationId: string, me: number) {
+    const rows = (await this.db.query(
+      `SELECT m."userId" FROM conversation_members m JOIN conversations c ON c.id = m."conversationId"
+       WHERE m."conversationId" = $1 AND c.type = 'direct' AND m."userId" <> $2 AND m."leftAt" IS NULL`,
+      [conversationId, me],
+    )) as { userId: number }[];
+    if (rows[0]) await this.blocks.assertCanInteract(me, rows[0].userId);
+  }
+
   // ---- Create ----
 
   async createDirect(me: number, otherId: number) {
@@ -130,6 +142,7 @@ export class ConversationsService {
     await this.liveUsers([otherId]).catch(() => {
       throw new NotFoundException('User not found');
     });
+    await this.blocks.assertCanInteract(me, otherId);
     const key = directKey(me, otherId);
 
     const find = async () =>

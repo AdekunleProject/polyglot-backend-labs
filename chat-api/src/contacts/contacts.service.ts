@@ -63,8 +63,10 @@ export class ContactsService {
     const rows = rowsOf<{ id: number; username: string; firstname: string; lastname: string }>(
       await this.db.query(
         `SELECT id, username, firstname, lastname FROM users
-         WHERE id = $1 AND "isActive" = true AND "deletedAt" IS NULL AND "qrEnabled" = true AND "qrVersion" = $2`,
-        [payload.sub, payload.qv],
+         WHERE id = $1 AND "isActive" = true AND "deletedAt" IS NULL AND "qrEnabled" = true AND "qrVersion" = $2
+           AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b."blockerId" = $3 AND b."blockedId" = $1)
+                                                      OR (b."blockerId" = $1 AND b."blockedId" = $3))`,
+        [payload.sub, payload.qv, me],
       ),
     );
     if (!rows[0]) throw invalid;

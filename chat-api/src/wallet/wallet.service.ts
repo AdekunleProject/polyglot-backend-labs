@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
+import { BlocksService } from '../chat/blocks.service';
 import { ConversationsService } from '../chat/conversations.service';
 import { MessagesService } from '../chat/messages.service';
 import { PushService } from '../devices/push.service';
@@ -77,6 +78,7 @@ export class WalletService {
     private readonly conversations: ConversationsService,
     private readonly messages: MessagesService,
     private readonly contacts: ContactsService,
+    private readonly blocks: BlocksService,
   ) {}
 
   private get limits() {
@@ -295,6 +297,7 @@ export class WalletService {
       [input.toUserId],
     )) as unknown[];
     if (payee.length === 0) throw new NotFoundException('User not found');
+    await this.blocks.assertCanInteract(me, input.toUserId);
 
     try {
       const row = await this.db.transaction((tx) =>

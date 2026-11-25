@@ -16,6 +16,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { LinksModule } from './links/links.module';
 import { WalletModule } from './wallet/wallet.module';
 import { StatusModule } from './status/status.module';
+import { ModerationModule } from './moderation/moderation.module';
 import { PhoneModule } from './phone/phone.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { DevicesModule } from './devices/devices.module';
@@ -78,6 +79,7 @@ import { validateEnv } from './config/env.validation';
     StatusModule,
     WalletModule,
     CallsModule,
+    ModerationModule,
   ],
   controllers: [AppController],
   providers: [
