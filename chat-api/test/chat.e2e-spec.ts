@@ -1304,7 +1304,7 @@ describe('Chat (integration)', () => {
 
     beforeAll(async () => {
       [ada, bob] = [await person('Lola'), await person('Mide')];
-      [mgr, boss, sup] = [await person('Mgr2'), await person('Boss2'), await person('Sup2')];
+      [mgr, boss, sup] = [await person('Mgrb'), await person('Bossb'), await person('Supb')];
       const db = app.get<DataSource>(getDataSourceToken());
       await db.query(`UPDATE users SET role = 'manager' WHERE id = $1`, [mgr.id]);
       await db.query(`UPDATE users SET role = 'admin' WHERE id = $1`, [boss.id]);
