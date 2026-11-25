@@ -20,6 +20,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Internal server error';
+    const extra: Record<string, number> = {};
 
     if (exception instanceof HttpException) {
       // errors we threw on purpose (404, 401, validation 400...)
@@ -30,6 +31,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? body
           : ((body as { message?: string | string[] }).message ??
             exception.message);
+      // Numbers a client needs to act on (app lock waits and guesses left).
+      if (typeof body === 'object') {
+        for (const key of ['attemptsLeft', 'tryAgainInSeconds']) {
+          const value = (body as Record<string, unknown>)[key];
+          if (typeof value === 'number') extra[key] = value;
+        }
+      }
     } else if (exception instanceof QueryFailedError) {
       // database errors: PostgreSQL error codes
       const code = (
@@ -56,9 +64,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       this.logger.warn(`${req.method} ${req.url} -> ${status}`);
     }
 
+    if (extra.tryAgainInSeconds) res.setHeader('Retry-After', String(extra.tryAgainInSeconds));
     res.status(status).json({
       statusCode: status,
       message,
+      ...extra,
       path: req.url,
       timestamp: new Date().toISOString(),
     });
