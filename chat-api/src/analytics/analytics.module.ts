@@ -11,5 +11,6 @@ import { DigestService } from './digest.service';
   imports: [TypeOrmModule.forFeature([User]), AuditModule, MailModule],
   controllers: [AnalyticsController],
   providers: [AnalyticsService, DigestService],
+  exports: [DigestService],
 })
 export class AnalyticsModule {}

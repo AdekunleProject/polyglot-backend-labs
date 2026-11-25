@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
@@ -46,6 +46,8 @@ export interface StoredMedia {
 
 @Injectable()
 export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
+
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly conversations: ConversationsService,
@@ -152,6 +154,32 @@ export class MediaService {
 
   async attach(mediaId: string, messageId: number) {
     await this.db.query(`UPDATE media_uploads SET "messageId" = $2 WHERE id = $1`, [mediaId, messageId]);
+  }
+
+  /**
+   * Uploads that were never sent in a message: the person picked a file and
+   * then changed their mind. After a day the file and the row are removed.
+   * Status uploads (no chat) are left alone, the status owns those.
+   */
+  async cleanupUnused(olderThanHours = 24) {
+    const rows = (await this.db.query(
+      `SELECT id, key FROM media_uploads
+       WHERE "messageId" IS NULL AND "conversationId" IS NOT NULL
+         AND "createdAt" < now() - ($1 || ' hours')::interval
+       ORDER BY "createdAt" LIMIT 500`,
+      [String(olderThanHours)],
+    )) as { id: string; key: string }[];
+    let removed = 0;
+    for (const row of rows) {
+      try {
+        await this.files.deleteFile(row.key);
+        await this.db.query(`DELETE FROM media_uploads WHERE id = $1`, [row.id]);
+        removed += 1;
+      } catch (error) {
+        this.logger.warn(`Could not remove unused upload ${row.id}: ${(error as Error).message}`);
+      }
+    }
+    return removed;
   }
 
   /** A deleted message takes its file with it. */

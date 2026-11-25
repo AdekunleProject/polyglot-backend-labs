@@ -13,6 +13,8 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { FileUpload } from '../src/aws/aws.file-upload';
 import { decryptBackup } from '../src/backups/backup-crypto';
+import { MediaService } from '../src/chat/media.service';
+import { MaintenanceService } from '../src/queue/maintenance.service';
 import { StatusService } from '../src/status/status.service';
 import { MailService } from '../src/mail/mail.service';
 import { SmsService } from '../src/phone/sms.service';
@@ -1373,6 +1375,36 @@ describe('Chat (integration)', () => {
       const res = await http().post('/analytics/digest/send').set(auth(sup));
       expect(res.status).toBe(201);
       expect(res.body.recipients).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('background jobs', () => {
+    it('removes uploads that were never sent after a day, and keeps the rest', async () => {
+      const ada = await person('Pia');
+      const bob = await person('Quin');
+      const chat = (await http().post('/conversations/direct').set(auth(ada)).send({ userId: bob.id })).body.id;
+      const db = app.get<DataSource>(getDataSourceToken());
+      const ask = async () =>
+        (await http().post('/media/uploads').set(auth(ada)).send({ conversationId: chat, kind: 'file', contentType: 'application/pdf', size: 1000, filename: 'a.pdf' })).body;
+      const stale = await ask();
+      const fresh = await ask();
+      const sent = await ask();
+      files.finish(sent.uploadUrl, 1000);
+      await http().post(`/conversations/${chat}/messages`).set(auth(ada)).send({ clientId: 'job-1', type: 'file', mediaId: sent.mediaId }).expect(201);
+      await db.query(`UPDATE media_uploads SET "createdAt" = now() - interval '2 days' WHERE id IN ($1, $2)`, [stale.mediaId, sent.mediaId]);
+
+      const removed = await app.get(MediaService).cleanupUnused();
+      expect(removed).toBeGreaterThanOrEqual(1);
+      const left = (await db.query(`SELECT id FROM media_uploads WHERE id IN ($1, $2, $3)`, [stale.mediaId, fresh.mediaId, sent.mediaId])) as { id: string }[];
+      expect(left.map((r) => r.id).sort()).toEqual([fresh.mediaId, sent.mediaId].sort());
+      expect(files.deleted.some((key) => key.includes(stale.mediaId))).toBe(true);
+    });
+
+    it('runs the maintenance jobs by name', async () => {
+      const maintenance = app.get(MaintenanceService);
+      await expect(maintenance.run('status-sweep')).resolves.not.toThrow();
+      await expect(maintenance.run('digest-check')).resolves.toBeUndefined();
+      await expect(maintenance.run('nothing')).resolves.toBeUndefined();
     });
   });
 });

@@ -7,5 +7,6 @@ import { StatusService } from './status.service';
   imports: [ChatModule],
   controllers: [StatusController],
   providers: [StatusService],
+  exports: [StatusService],
 })
 export class StatusModule {}

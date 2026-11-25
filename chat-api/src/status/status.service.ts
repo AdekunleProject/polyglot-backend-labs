@@ -4,8 +4,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -49,9 +47,8 @@ export const VISIBLE_TO_1 = `
 const MAX_ACTIVE = 30;
 
 @Injectable()
-export class StatusService implements OnApplicationBootstrap, OnModuleDestroy {
+export class StatusService {
   private readonly logger = new Logger(StatusService.name);
-  private timer?: NodeJS.Timeout;
 
   constructor(
     @InjectDataSource() private readonly db: DataSource,
@@ -62,17 +59,7 @@ export class StatusService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly config: ConfigService,
   ) {}
 
-  /** Expired posts disappear from every read at once; this sweep removes the rows and files. */
-  onApplicationBootstrap() {
-    if (this.config.get('NODE_ENV') === 'test') return;
-    this.timer = setInterval(() => void this.sweep(), 60 * 60_000);
-    this.timer.unref();
-  }
-
-  onModuleDestroy() {
-    if (this.timer) clearInterval(this.timer);
-  }
-
+  /** Expired posts disappear from every read at once; the maintenance job runs this sweep to remove the rows and files. */
   async sweep() {
     try {
       const gone = rowsOf<{ media: StoredMedia | null }>(

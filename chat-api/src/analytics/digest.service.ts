@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
@@ -12,13 +12,12 @@ const DAY = 24 * 60 * 60 * 1000;
 
 /**
  * Weekly summary for the superadmins by email. Off unless WEEKLY_DIGEST=true.
- * Checks hourly; sends on DIGEST_DAY after DIGEST_HOUR (local), once a week,
+ * The maintenance job checks hourly; sends on DIGEST_DAY after DIGEST_HOUR (local), once a week,
  * decided by the audit log so a restart does not repeat it.
  */
 @Injectable()
-export class DigestService implements OnModuleInit, OnModuleDestroy {
+export class DigestService {
   private readonly logger = new Logger(DigestService.name);
-  private timer?: NodeJS.Timeout;
 
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
@@ -28,17 +27,9 @@ export class DigestService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
   ) {}
 
-  onModuleInit() {
+  /** Called hourly by the maintenance job. */
+  async tick() {
     if (this.config.get('WEEKLY_DIGEST') !== 'true') return;
-    this.timer = setInterval(() => void this.tick(), 60 * 60 * 1000);
-    this.timer.unref();
-  }
-
-  onModuleDestroy() {
-    if (this.timer) clearInterval(this.timer);
-  }
-
-  private async tick() {
     try {
       const offset = Number(this.config.get('REPORT_TZ_OFFSET_HOURS') ?? 1);
       const local = new Date(Date.now() + offset * 60 * 60 * 1000);

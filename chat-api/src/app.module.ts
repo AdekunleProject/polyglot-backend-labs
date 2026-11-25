@@ -16,6 +16,8 @@ import { ContactsModule } from './contacts/contacts.module';
 import { LinksModule } from './links/links.module';
 import { WalletModule } from './wallet/wallet.module';
 import { StatusModule } from './status/status.module';
+import { QueueModule } from './queue/queue.module';
+import { MaintenanceModule } from './queue/maintenance.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { PhoneModule } from './phone/phone.module';
@@ -68,6 +70,7 @@ import { validateEnv } from './config/env.validation';
         migrationsRun: config.get('RUN_MIGRATIONS') === 'true',
       }),
     }),
+    QueueModule,
     AuthModule,
     UsersModule,
     RealtimeModule,
@@ -82,6 +85,7 @@ import { validateEnv } from './config/env.validation';
     CallsModule,
     ModerationModule,
     AnalyticsModule,
+    MaintenanceModule,
   ],
   controllers: [AppController],
   providers: [
