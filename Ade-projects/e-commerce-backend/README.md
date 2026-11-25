@@ -38,7 +38,7 @@ Four roles sit in a ladder, and each staff role owns one area of work:
 - Staff can act only on accounts below them. Managers look after customer accounts, admins can also deactivate and delete them, and nobody acts on themselves or an equal.
 - Deactivate, activate, delete (a soft delete) and restore need a reason, and each is written to the audit log.
 - A person whose account was created by an admin receives a one-time password by email, and may use only a few routes until they change it. Production refuses to create the account if email is not set up.
-- `GET /audit-logs` (superadmin) lists who did what, with filters.
+- `GET /audit-logs` (superadmin) lists who did what, with filters. Besides account actions, it records every product create, edit (with the old and new values) and delete, variant create, stock change (old and new) and delete, and order update (old and new status).
 
 ### Catalogue, cart and orders
 
@@ -62,6 +62,9 @@ Four roles sit in a ladder, and each staff role owns one area of work:
 - In-app notifications with unread counts.
 - Dashboards by role: `GET /analytics/manager`, `/admin` and `/superadmin`, plus a customer's own dashboard. Staff can also open a customer's dashboard.
 - Reports on orders, products, inventory and transactions.
+- A staff-activity report (`GET /analytics/staff-activity`, JSON or CSV): what each person on the team did in a period, with flags for many removals, many openings of customer accounts, off-hours work and a missing second factor. A manager sees only themselves, an admin sees managers, and the superadmin sees admins and managers.
+- A sales report (`GET /analytics/sales`, JSON or CSV, admins and above): orders, paid money, refunds and new customers per day.
+- A weekly email digest to the superadmins (sales, refunds, new customers, team activity and anything flagged), switched on with `WEEKLY_DIGEST=true`, or sent now with `POST /analytics/digest/send`.
 
 ### Operations
 
@@ -142,6 +145,8 @@ The app checks its settings when it starts. It refuses to boot if `MONGODB_URI`,
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET` | File uploads to S3 |
 | `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, `MAIL_PASS`, `MAIL_FROM` | SMTP settings for verification, reset and new-account emails |
 | `REFUND_CLAIM_HOURS`, `REPLACEMENT_CLAIM_HOURS`, `CANCELLATION_REFUND_PERCENT` | The refund policy (defaults 24, 72 and 65) |
+| `WEEKLY_DIGEST`, `DIGEST_DAY`, `DIGEST_HOUR`, `REPORT_TZ_OFFSET_HOURS` | The weekly digest (off by default) |
+| `FLAG_DELETES`, `FLAG_LOOKUPS`, `OFF_HOURS_START`, `OFF_HOURS_END` | Staff-activity flag thresholds |
 | `ENABLE_DOCS` | Swagger is on except when `NODE_ENV=production`; set `true` or `false` to override |
 | `THROTTLE_LIMIT`, `TRUST_PROXY` | Requests per minute per client address (default 60); set `TRUST_PROXY=true` behind a load balancer |
 | `REDIS_URL` | Share rate-limit counters between replicas. Optional; without it, or while Redis is down, each instance counts alone |
@@ -229,7 +234,7 @@ Full, interactive documentation is in Swagger at `/docs`. Main route groups:
 | `/payments` | Initialise, verify, refund, webhook, bank-transfer approval |
 | `/refunds` | Customer: request and list own. Staff: list and view, manager `verify` and `replacement-sent`, admin `decide` |
 | `/notifications` | List, unread count, mark as read |
-| `/analytics` | `manager`, `admin` and `superadmin` dashboards, a customer's own dashboard, and order, product, inventory and transaction reports |
+| `/analytics` | `manager`, `admin` and `superadmin` dashboards, a customer's own dashboard, order, product, inventory and transaction reports, `staff-activity`, `sales` and `digest/send` |
 | `/health`, `/ready` | Liveness and readiness |
 
 Browsing products, variants, brands and categories is public. Customers manage their own cart, orders, payments and refund requests. What each staff role can do is set by the role ladder above and enforced on the server.
@@ -240,9 +245,9 @@ Browsing products, variants, brands and categories is public. Customers manage t
 pnpm test
 ```
 
-The unit tests cover the roles guard and the role policy, the global exception filter, the health route, Paystack webhook signature checking, atomic stock handling, token hashing, access restrictions and the Redis rate-limit storage. Run the command to see the current number of tests. The CI pipeline runs them on every push.
+The unit tests cover the staff-activity flags, the CSV export, the roles guard and the role policy, the global exception filter, the health route, Paystack webhook signature checking, atomic stock handling, token hashing, access restrictions and the Redis rate-limit storage. Run the command to see the current number of tests. The CI pipeline runs them on every push.
 
-Integration tests start the real app against a real MongoDB replica set and fake only Paystack. The checkout test (`test/checkout.e2e-spec.ts`) checks that stock is reserved, that two buyers cannot both get the last unit (repeated 10 times), that the amount sent to Paystack is in kobo, that a webhook with a bad signature changes nothing, that a good one marks the payment and order paid only after Paystack confirms the amount, and that a replayed webhook is ignored. The auth tests cover sign-up, tokens, resets and 2FA. To run them locally:
+Integration tests start the real app against a real MongoDB replica set and fake only Paystack. The checkout test (`test/checkout.e2e-spec.ts`) checks that stock is reserved, that two buyers cannot both get the last unit (repeated 10 times), that the amount sent to Paystack is in kobo, that a webhook with a bad signature changes nothing, that a good one marks the payment and order paid only after Paystack confirms the amount, and that a replayed webhook is ignored. The auth tests cover sign-up, tokens, resets and 2FA, and the staff-reports tests cover the audit trail, the per-role staff list, the sales report and the digest. To run them locally:
 
 ```bash
 docker run -d --name it-mongo -p 27017:27017 mongo:7 --replSet rs0 --bind_ip_all
@@ -307,7 +312,8 @@ The cluster costs roughly 0.35 USD per hour while it is running. Destroy it when
 
 - Because refresh tokens rotate, a client must save the new `refreshToken` that `/auth/refresh` returns and must not send two refresh calls for the same token at once, or it gets signed out. Sessions are not listed or revocable one by one from the API yet.
 - Two-factor has no admin reset yet: someone who loses both the authenticator and the backup codes needs a database change.
-- Audit entries cover account actions, role changes and refund steps. Product, price, stock and order-status changes are not audited yet, and there are no staff-activity reports or weekly digest like the blog and chat APIs have.
+- Audit entries cover account actions, role changes, refund steps and product, stock and order changes. Price is audited when a product is edited, but a variant's price cannot be changed through the API yet, so there is nothing to audit there.
+- The weekly digest runs in the app process, so with several replicas two could send in the same hour; run it on one replica or call `POST /analytics/digest/send` from a cron job. It has not been tested against a real mail server.
 - The temporary password for an admin-created user travels in a plain-text email until they change it.
 - Google sign-in still returns its tokens in the redirect query string, which should move to the URL fragment together with a matching change in the frontend.
 - Rate limits are shared across replicas only when `REDIS_URL` is set. In Kubernetes, point it at a managed Redis; the chart does not deploy one. Redis is used for the limiter only, not as a cache.
