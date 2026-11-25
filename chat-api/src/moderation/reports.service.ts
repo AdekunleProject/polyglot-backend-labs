@@ -20,7 +20,7 @@ import { VISIBLE_TO_1 } from '../status/status.service';
 import { UsersService } from '../users/users.service';
 import type { CreateReportDto, DecideReportDto, ListReportsQueryDto } from './dto/reports.dto';
 
-interface ReportRow {
+export interface ReportRow {
   id: number;
   reporterId: number;
   targetType: 'user' | 'message' | 'status';
