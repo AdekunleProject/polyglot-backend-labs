@@ -13,6 +13,8 @@ import {
   BadRequestException,
   ForbiddenException,
   Patch,
+  Query,
+  Header,
 } from '@nestjs/common';
 
 import { CurrentUser } from '../common/decorators/current-user.decorators';
@@ -20,13 +22,63 @@ import { RolesGuard } from 'src/common/guards/roles.guard';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/role.enum';
+import type { Response } from 'express';
 import { AnalyticsService } from './analytics.service';
+import { toCsv } from './csv';
+import { DigestService } from './digest.service';
+import { RangeQueryDto } from './dto/range-query.dto';
 
 import type { CurrentUserInterface } from '../common/interfaces/current-user.interface';
 
 @Controller('analytics')
 export class AnalyticsController {
-  constructor(private readonly analyticsService: AnalyticsService) {}
+  constructor(
+    private readonly analyticsService: AnalyticsService,
+    private readonly digest: DigestService,
+  ) {}
+
+  /** What the team did. Superadmin sees admins and managers, an admin sees managers, a manager sees only themselves. */
+  @Get('staff-activity')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  async staffActivity(
+    @Query() query: RangeQueryDto,
+    @CurrentUser() user: CurrentUserInterface,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const report = await this.analyticsService.staffActivity(user, this.analyticsService.range(query.from, query.to));
+    if (query.format !== 'csv') return report;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="staff-activity.csv"');
+    return toCsv(
+      ['id', 'name', 'email', 'role', 'isActive', 'twoFactorEnabled', 'totalActions', 'lastActionAt', 'deletes', 'lookups', 'offHoursActions', 'flags', 'actions'],
+      report.staff.map((row) => ({
+        ...row,
+        flags: row.flags.join('; '),
+        actions: Object.entries(row.actions).map(([a, c]) => `${a}:${c}`).join('; '),
+      })),
+    );
+  }
+
+  @Get('sales')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  async sales(@Query() query: RangeQueryDto, @Res({ passthrough: true }) res: Response) {
+    const report = await this.analyticsService.sales(this.analyticsService.range(query.from, query.to));
+    if (query.format !== 'csv') return report;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="sales.csv"');
+    return toCsv(['day', 'orders', 'payments', 'revenue'], report.byDay);
+  }
+
+  /** Sends the weekly summary to the superadmins now. The same one the schedule sends. */
+  @Post('digest/send')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPERADMIN)
+  @Header('Cache-Control', 'no-store')
+  sendDigest(@CurrentUser() user: CurrentUserInterface) {
+    return this.digest.send(user.id);
+  }
 
   @Get('admin')
   @UseGuards(JwtAuthGuard, RolesGuard)

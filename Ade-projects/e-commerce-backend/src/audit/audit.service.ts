@@ -11,7 +11,16 @@ export type AuditAction =
   | 'user.deactivate'
   | 'user.activate'
   | 'user.delete'
-  | 'user.restore';
+  | 'user.restore'
+  | 'product.create'
+  | 'product.update'
+  | 'product.delete'
+  | 'variant.create'
+  | 'variant.stock_update'
+  | 'variant.delete'
+  | 'order.update'
+  | 'report.view'
+  | 'digest.sent';
 
 export interface AuditTarget {
   type: string;
@@ -33,13 +42,13 @@ export class AuditService {
 
   /** Never put passwords, codes or tokens in `details`. */
   async record(
-    actorId: string,
+    actorId: string | null,
     action: AuditAction | (string & {}),
     target?: AuditTarget,
     details?: Record<string, unknown>,
   ): Promise<void> {
     await this.logs.create({
-      actorId: new Types.ObjectId(actorId),
+      actorId: actorId ? new Types.ObjectId(actorId) : null,
       action,
       targetType: target?.type ?? null,
       targetId: target?.id ?? null,
@@ -89,6 +98,23 @@ export class AuditService {
       if (!lastActionAt || row.last > lastActionAt) lastActionAt = row.last;
     }
     return { since: from, total, byAction, lastActionAt };
+  }
+
+  /** Entries by the given people in a period, oldest first. */
+  async between(from: Date, to: Date, actorIds: string[]) {
+    return this.logs
+      .find({
+        actorId: { $in: actorIds.map((id) => new Types.ObjectId(id)) },
+        createdAt: { $gte: from, $lte: to },
+      })
+      .sort({ createdAt: 1 })
+      .select('actorId action createdAt')
+      .lean();
+  }
+
+  /** The newest entry of one kind, for "was the weekly digest already sent". */
+  async lastOf(action: string) {
+    return this.logs.findOne({ action }).sort({ createdAt: -1 }).lean();
   }
 
   /** The newest entries, for the superadmin's front page. */

@@ -1,3 +1,4 @@
+import { AuditModule } from '../audit/audit.module';
 import { Module } from '@nestjs/common';
 import { OrdersController } from './order.controller';
 import { OrdersService } from './order.service';
@@ -10,6 +11,7 @@ import { VariantsModule } from 'src/Product-Variants/product-variant.module';
 import { NotificationsModule } from 'src/notifications/notification.module';
 @Module({
   imports: [
+    AuditModule,
     MongooseModule.forFeature([
       { name: Order.name, schema: OrderSchema },
       { name: Cart.name, schema: CartSchema },

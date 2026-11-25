@@ -23,11 +23,14 @@ import {
   RefundRequestSchema,
 } from '../refunds/schemas/refund-request.schema';
 import { AnalyticsController } from './analytics.controller';
+import { DigestService } from './digest.service';
+import { MailModule } from '../helpers/mail/mail.module';
 
 @Module({
   imports: [
     AuditModule,
     ConfigModule,
+    MailModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Product.name, schema: ProductSchema },
@@ -41,7 +44,7 @@ import { AnalyticsController } from './analytics.controller';
   ],
   controllers: [AnalyticsController],
 
-  providers: [AnalyticsService],
+  providers: [AnalyticsService, DigestService],
 
   exports: [
     AnalyticsService,

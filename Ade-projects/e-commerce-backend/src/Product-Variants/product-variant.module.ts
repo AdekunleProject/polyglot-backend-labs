@@ -1,3 +1,4 @@
+import { AuditModule } from '../audit/audit.module';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 
@@ -12,6 +13,7 @@ import { FileUpload } from 'src/aws/aws.file-upload';
 
 @Module({
   imports: [
+    AuditModule,
     MongooseModule.forFeature([
       {
         name: ProductVariant.name,

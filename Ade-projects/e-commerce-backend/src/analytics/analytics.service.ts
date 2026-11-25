@@ -23,7 +23,21 @@ import {
 } from '../refunds/schemas/refund-request.schema';
 import { ForbiddenException } from '@nestjs/common';
 import type { CurrentUserInterface } from '../common/interfaces/current-user.interface';
-import { canView } from '../common/role-policy';
+import { canView, rolesBelow } from '../common/role-policy';
+import { BadRequestException } from '@nestjs/common';
+import {
+  DELETE_ACTIONS,
+  evaluateFlags,
+  FlagThresholds,
+  isOffHours,
+  LOOKUP_ACTIONS,
+  sumActions,
+} from './flags';
+
+export interface Range {
+  from: Date;
+  to: Date;
+}
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -619,6 +633,134 @@ export class AnalyticsService {
       address: user.address,
       email: user.email,
       phoneNumber: user.phoneNumber,
+    };
+  }
+
+  // ---- Staff activity, sales over time and the weekly summary ----
+
+  thresholds(): FlagThresholds {
+    return {
+      deletes: this.num('FLAG_DELETES', 10),
+      lookups: this.num('FLAG_LOOKUPS', 20),
+      offHoursStart: this.num('OFF_HOURS_START', 22),
+      offHoursEnd: this.num('OFF_HOURS_END', 6),
+      tzOffsetHours: this.num('REPORT_TZ_OFFSET_HOURS', 1),
+    };
+  }
+
+  /** `from` and `to` default to the last 30 days. A period is at most a year. */
+  range(from?: string, to?: string): Range {
+    const end = to ? new Date(to) : new Date();
+    const start = from ? new Date(from) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    if (start > end) throw new BadRequestException('"from" must be before "to"');
+    if (end.getTime() - start.getTime() > 366 * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException('A report can cover at most one year');
+    }
+    return { from: start, to: end };
+  }
+
+  /** Staff the caller may see: admins see managers, the superadmin sees admins and managers, everyone sees themselves. */
+  private async staffFor(actor: CurrentUserInterface) {
+    const below = rolesBelow(actor.role as Role).filter((role) => role !== Role.CUSTOMER);
+    return this.userModel
+      .find({
+        $or: [
+          { _id: new Types.ObjectId(actor.id) },
+          ...(below.length ? [{ role: { $in: below }, deletedAt: null }] : []),
+        ],
+      })
+      .select('firstname lastname email role isActive twoFactorEnabled')
+      .sort({ role: 1, firstname: 1 })
+      .lean();
+  }
+
+  async staffActivity(actor: CurrentUserInterface, { from, to }: Range, record = true) {
+    const staff = await this.staffFor(actor);
+    const thresholds = this.thresholds();
+    const entries = await this.audit.between(from, to, staff.map((s) => String(s._id)));
+    const rows = staff.map((person) => {
+      const mine = entries.filter((e) => String(e.actorId) === String(person._id));
+      const counts: Record<string, number> = {};
+      let offHours = 0;
+      let lastActionAt: Date | null = null;
+      for (const entry of mine) {
+        counts[entry.action] = (counts[entry.action] ?? 0) + 1;
+        if (isOffHours(entry.createdAt, thresholds)) offHours += 1;
+        lastActionAt = entry.createdAt;
+      }
+      const twoFactorEnabled = Boolean(person.twoFactorEnabled);
+      return {
+        id: String(person._id),
+        name: `${person.firstname} ${person.lastname}`,
+        email: person.email,
+        role: person.role,
+        isActive: person.isActive,
+        twoFactorEnabled,
+        totalActions: mine.length,
+        lastActionAt,
+        deletes: sumActions(counts, DELETE_ACTIONS),
+        lookups: sumActions(counts, LOOKUP_ACTIONS),
+        offHoursActions: offHours,
+        actions: counts,
+        flags: evaluateFlags({ counts, offHoursActions: offHours, twoFactorEnabled, thresholds }),
+      };
+    });
+    if (record) await this.audit.record(actor.id, 'report.view', undefined, { report: 'staff-activity' });
+    return { from, to, thresholds, staff: rows };
+  }
+
+  /** Orders, paid money (naira), refunds and new customers in a period, with a row per day. */
+  async sales({ from, to }: Range) {
+    const day = { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } };
+    const [orders, paid, refunded, newCustomers] = await Promise.all([
+      this.orderModel.aggregate<{ _id: string; count: number }>([
+        { $match: { createdAt: { $gte: from, $lte: to } } },
+        { $group: { _id: day, count: { $sum: 1 } } },
+      ]),
+      this.paymentModel.aggregate<{ _id: string; count: number; amount: number }>([
+        {
+          $match: {
+            status: { $in: [PaymentStatus.PAID, PaymentStatus.REFUNDED] },
+            createdAt: { $gte: from, $lte: to },
+          },
+        },
+        { $group: { _id: day, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+      ]),
+      this.paymentModel.aggregate<{ _id: null; count: number; amount: number }>([
+        { $match: { status: PaymentStatus.REFUNDED, refundedAt: { $gte: from, $lte: to } } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            amount: { $sum: { $ifNull: ['$refundedAmount', '$amount'] } },
+          },
+        },
+      ]),
+      this.userModel.countDocuments({ role: Role.CUSTOMER, createdAt: { $gte: from, $lte: to } }),
+    ]);
+    const days = new Map<string, { day: string; orders: number; payments: number; revenue: number }>();
+    const entry = (key: string) => {
+      const found = days.get(key) ?? { day: key, orders: 0, payments: 0, revenue: 0 };
+      days.set(key, found);
+      return found;
+    };
+    for (const row of orders) entry(row._id).orders = row.count;
+    for (const row of paid) {
+      entry(row._id).payments = row.count;
+      entry(row._id).revenue = row.amount;
+    }
+    return {
+      from,
+      to,
+      totals: {
+        orders: orders.reduce((t, r) => t + r.count, 0),
+        payments: paid.reduce((t, r) => t + r.count, 0),
+        revenue: paid.reduce((t, r) => t + r.amount, 0),
+        refunds: refunded[0]?.count ?? 0,
+        refundedAmount: refunded[0]?.amount ?? 0,
+        newCustomers,
+      },
+      byDay: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
     };
   }
 }
