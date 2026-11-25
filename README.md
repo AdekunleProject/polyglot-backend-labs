@@ -11,3 +11,9 @@ A collection of backend projects and DevOps work by Alimi Lateef Adekunle.
 | [sql-practice](sql-practice) | SQL practice exercises |
 
 The CI pipelines for the e-commerce and MarketEdge backends are in [.github/workflows](.github/workflows).
+
+## Licence
+
+You are welcome to read, run and learn from everything here. It is licensed under the
+[PolyForm Noncommercial License 1.0.0](LICENSE): free for personal study, hobby projects, education and
+other noncommercial use. Commercial use needs written permission from the author.
