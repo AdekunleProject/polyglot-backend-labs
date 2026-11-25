@@ -22,6 +22,7 @@ export type AuditAction =
   | 'wallet.unfreeze'
   | 'wallet.reverse'
   | 'auth.device_link'
+  | 'auth.app_lock_signout'
   | 'auth.phone_login'
   | 'auth.phone_add'
   | 'contact.scan'

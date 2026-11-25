@@ -16,6 +16,7 @@ import {
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
+import { AppUnlockedGuard } from '../app-lock/app-unlocked.guard';
 import type { AuthUser } from '../auth/auth-user.type';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -43,6 +44,7 @@ export class WalletController {
   }
 
   @Post('fund')
+  @UseGuards(AppUnlockedGuard)
   @HttpCode(200)
   @Throttle(perMinute(10))
   fund(@CurrentUser() user: AuthUser, @Body() dto: FundDto) {
@@ -55,6 +57,7 @@ export class WalletController {
   }
 
   @Post('transfer')
+  @UseGuards(AppUnlockedGuard)
   @Throttle(perMinute(20))
   transfer(@CurrentUser() user: AuthUser, @Body() dto: TransferDto) {
     return this.wallet.transfer(user.id, {
@@ -73,12 +76,14 @@ export class WalletController {
   }
 
   @Post('pay-qr')
+  @UseGuards(AppUnlockedGuard)
   @Throttle(perMinute(20))
   payQr(@CurrentUser() user: AuthUser, @Body() dto: PayQrDto) {
     return this.wallet.payQr(user.id, dto.code, dto.amount, dto.note, dto.idempotencyKey);
   }
 
   @Post('chats/:conversationId/pay')
+  @UseGuards(AppUnlockedGuard)
   @Throttle(perMinute(20))
   payInChat(
     @CurrentUser() user: AuthUser,

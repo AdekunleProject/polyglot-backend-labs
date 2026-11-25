@@ -1,5 +1,6 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { AppUnlockedGuard } from '../app-lock/app-unlocked.guard';
 import type { AuthUser } from '../auth/auth-user.type';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -37,7 +38,7 @@ export class LinksController {
 
   @Post('approve')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AppUnlockedGuard)
   @Throttle(perMinute(20))
   approve(@CurrentUser() user: AuthUser, @Body() dto: LinkSecretDto) {
     return this.links.approve(user.id, dto.linkId, dto.secret);

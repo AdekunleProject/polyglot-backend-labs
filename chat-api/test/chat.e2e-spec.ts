@@ -1407,4 +1407,110 @@ describe('Chat (integration)', () => {
       await expect(maintenance.run('nothing')).resolves.toBeUndefined();
     });
   });
+
+  describe('app lock', () => {
+    let ada: Person;
+    let db: DataSource;
+    const GOOD = 'Blue7sky';
+    const lock = (p: Person) => http().get('/app-lock').set(auth(p));
+    const unlock = (p: Person, passcode: string) => http().post('/app-lock/unlock').set(auth(p)).send({ passcode });
+    const pay = (p: Person) =>
+      http().post('/wallet/transfer').set(auth(p)).send({ toUserId: 999999, amount: 100, idempotencyKey: `lock-${Date.now()}-${Math.random()}` });
+
+    beforeAll(async () => {
+      ada = await person('Rita');
+      db = app.get<DataSource>(getDataSourceToken());
+    });
+
+    it('starts with no lock, and unlocking something that is not on is a 404', async () => {
+      expect((await lock(ada)).body).toEqual({ enabled: false });
+      expect((await unlock(ada, GOOD)).status).toBe(404);
+    });
+
+    it('needs a passcode that is not weak and not the account password', async () => {
+      const set = (body: Record<string, unknown>) => http().post('/app-lock').set(auth(ada)).send(body);
+      expect((await set({ passcode: '123' })).status).toBe(400);
+      expect((await set({ passcode: '123456' })).status).toBe(400);
+      expect((await set({ passcode: PASSWORD })).status).toBe(400);
+      const ok = await set({ passcode: GOOD, biometric: false, autoLockSeconds: 300 });
+      expect(ok.status).toBe(200);
+      expect(ok.body).toMatchObject({ enabled: true, locked: false, biometric: false, autoLockSeconds: 300 });
+      expect(JSON.stringify(ok.body)).not.toContain(GOOD);
+      expect((await set({ passcode: 'Other8sky' })).status).toBe(400);
+      const stored = (await db.query(`SELECT "passcodeHash" FROM app_locks WHERE "userId" = $1`, [ada.id])) as { passcodeHash: string }[];
+      expect(stored[0].passcodeHash).not.toContain(GOOD);
+    });
+
+    it('blocks money and backups while locked, and lets them through after the passcode', async () => {
+      expect((await http().post('/app-lock/lock').set(auth(ada))).body.locked).toBe(true);
+      expect((await pay(ada)).status).toBe(423);
+      expect((await http().post('/backups').set(auth(ada)).send({ password: 'a-long-backup-password' })).status).toBe(423);
+      expect((await http().get('/auth/me').set(auth(ada))).status).toBe(200);
+
+      const wrong = await unlock(ada, 'Wrong1pass');
+      expect(wrong.status).toBe(401);
+      expect(wrong.body.attemptsLeft).toBe(4);
+      expect((await pay(ada)).status).toBe(423);
+
+      const right = await unlock(ada, GOOD);
+      expect(right.status).toBe(200);
+      expect(right.body.locked).toBe(false);
+      expect((await pay(ada)).status).not.toBe(423);
+    });
+
+    it('turns Face ID or fingerprint on only with the passcode', async () => {
+      await http().post('/app-lock/lock').set(auth(ada));
+      expect((await http().post('/app-lock/unlock/biometric').set(auth(ada))).status).toBe(400);
+      await unlock(ada, GOOD);
+
+      const bad = await http().patch('/app-lock').set(auth(ada)).send({ passcode: 'Wrong1pass', biometric: true });
+      expect(bad.status).toBe(401);
+      const on = await http().patch('/app-lock').set(auth(ada)).send({ passcode: GOOD, biometric: true });
+      expect(on.body.biometric).toBe(true);
+
+      await http().post('/app-lock/lock').set(auth(ada));
+      const bio = await http().post('/app-lock/unlock/biometric').set(auth(ada));
+      expect(bio.status).toBe(200);
+      expect(bio.body.locked).toBe(false);
+    });
+
+    it('changes the passcode: the old one stops working', async () => {
+      const changed = await http().patch('/app-lock').set(auth(ada)).send({ passcode: GOOD, newPasscode: 'Green4leaf' });
+      expect(changed.status).toBe(200);
+      expect((await unlock(ada, GOOD)).status).toBe(401);
+      expect((await unlock(ada, 'Green4leaf')).status).toBe(200);
+    });
+
+    it('is per device: another sign-in has no lock', async () => {
+      const email = ((await db.query(`SELECT email FROM users WHERE id = $1`, [ada.id])) as { email: string }[])[0].email;
+      const other = await http().post('/auth/login').send({ email, password: PASSWORD });
+      expect(other.status).toBe(201);
+      const second: Person = { id: ada.id, token: other.body.accessToken, name: 'second' };
+      expect((await lock(second)).body).toEqual({ enabled: false });
+      expect((await pay(second)).status).not.toBe(423);
+    });
+
+    it('makes the person wait after five wrong guesses, then signs the device out after ten', async () => {
+      let last = await unlock(ada, 'Wrong1pass');
+      for (let i = 0; i < 4; i++) last = await unlock(ada, 'Wrong1pass');
+      expect(last.status).toBe(429);
+      expect(last.body.tryAgainInSeconds).toBeGreaterThan(0);
+      expect((await unlock(ada, 'Green4leaf')).status).toBe(429);
+      expect((await lock(ada)).body.tryAgainInSeconds).toBeGreaterThan(0);
+
+      await db.query(`UPDATE app_locks SET "lockedUntil" = NULL, "failedAttempts" = 9 WHERE "userId" = $1`, [ada.id]);
+      const out = await unlock(ada, 'Wrong1pass');
+      expect(out.status).toBe(401);
+      expect((await http().get('/auth/me').set(auth(ada))).status).toBe(401);
+    });
+
+    it('turns off with the passcode', async () => {
+      const bob = await person('Sade');
+      await http().post('/app-lock').set(auth(bob)).send({ passcode: GOOD }).expect(200);
+      expect((await http().delete('/app-lock').set(auth(bob)).send({ passcode: 'Wrong1pass' })).status).toBe(401);
+      const off = await http().delete('/app-lock').set(auth(bob)).send({ passcode: GOOD });
+      expect(off.body).toEqual({ enabled: false });
+      expect((await lock(bob)).body).toEqual({ enabled: false });
+    });
+  });
 });

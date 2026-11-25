@@ -16,6 +16,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { LinksModule } from './links/links.module';
 import { WalletModule } from './wallet/wallet.module';
 import { StatusModule } from './status/status.module';
+import { AppLockModule } from './app-lock/app-lock.module';
 import { QueueModule } from './queue/queue.module';
 import { MaintenanceModule } from './queue/maintenance.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -79,6 +80,7 @@ import { validateEnv } from './config/env.validation';
     ContactsModule,
     LinksModule,
     PhoneModule,
+    AppLockModule,
     BackupsModule,
     StatusModule,
     WalletModule,

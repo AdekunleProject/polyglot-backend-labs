@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { AppUnlockedGuard } from '../app-lock/app-unlocked.guard';
 import type { AuthUser } from '../auth/auth-user.type';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -13,6 +14,7 @@ export class BackupsController {
   constructor(private readonly backups: BackupsService) {}
 
   @Post()
+  @UseGuards(AppUnlockedGuard)
   @HttpCode(202)
   @Throttle(perMinute(3))
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateBackupDto) {
