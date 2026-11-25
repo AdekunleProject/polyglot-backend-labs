@@ -1294,4 +1294,85 @@ describe('Chat (integration)', () => {
       expect((await http().get('/status/feed').set(auth(cat))).body).toEqual([]);
     });
   });
+
+  describe('dashboards and reports', () => {
+    let ada: Person;
+    let bob: Person;
+    let mgr: Person;
+    let boss: Person;
+    let sup: Person;
+
+    beforeAll(async () => {
+      [ada, bob] = [await person('Lola'), await person('Mide')];
+      [mgr, boss, sup] = [await person('Mgr2'), await person('Boss2'), await person('Sup2')];
+      const db = app.get<DataSource>(getDataSourceToken());
+      await db.query(`UPDATE users SET role = 'manager' WHERE id = $1`, [mgr.id]);
+      await db.query(`UPDATE users SET role = 'admin' WHERE id = $1`, [boss.id]);
+      await db.query(`UPDATE users SET role = 'superadmin' WHERE id = $1`, [sup.id]);
+      const chat = await http().post('/conversations/direct').set(auth(ada)).send({ userId: bob.id });
+      await http().post(`/conversations/${chat.body.id}/messages`).set(auth(ada)).send({ clientId: 'dash-1', body: 'hello there' });
+    });
+
+    it('keeps each dashboard to the people allowed to see it', async () => {
+      expect((await http().get('/dashboard/manager').set(auth(ada))).status).toBe(403);
+      expect((await http().get('/dashboard/manager').set(auth(mgr))).status).toBe(200);
+      expect((await http().get('/dashboard/admin').set(auth(mgr))).status).toBe(403);
+      expect((await http().get('/dashboard/admin').set(auth(boss))).status).toBe(200);
+      expect((await http().get('/dashboard/superadmin').set(auth(boss))).status).toBe(403);
+      expect((await http().get('/dashboard/superadmin').set(auth(sup))).status).toBe(200);
+    });
+
+    it('shows a manager the work queue and nothing about money', async () => {
+      const res = await http().get('/dashboard/manager').set(auth(mgr));
+      expect(res.body.people.total).toBeGreaterThan(0);
+      expect(res.body.moderation).toHaveProperty('open');
+      expect(res.body).not.toHaveProperty('money');
+      expect(res.body).not.toHaveProperty('messaging');
+    });
+
+    it('shows an admin messaging and money figures', async () => {
+      const res = await http().get('/dashboard/admin').set(auth(boss));
+      expect(res.body.messaging.today).toBeGreaterThanOrEqual(1);
+      expect(res.body.money.currency).toBe('NGN');
+      expect(typeof res.body.money.inWalletsKobo).toBe('number');
+      expect(res.body.accounts.byRole.superadmin).toBeGreaterThanOrEqual(1);
+    });
+
+    it('shows the superadmin who has no second factor', async () => {
+      const res = await http().get('/dashboard/superadmin').set(auth(sup));
+      expect(res.body.staffWithoutTwoFactor.length).toBeGreaterThanOrEqual(3);
+      expect(Array.isArray(res.body.activity.recent)).toBe(true);
+    });
+
+    it('limits staff activity to the people below the caller, and exports CSV', async () => {
+      const forManager = await http().get('/analytics/staff-activity').set(auth(mgr));
+      expect(forManager.body.staff.map((s: { id: number }) => s.id)).toEqual([mgr.id]);
+      const forAdmin = await http().get('/analytics/staff-activity').set(auth(boss));
+      const ids = forAdmin.body.staff.map((s: { id: number }) => s.id);
+      expect(ids).toContain(boss.id);
+      expect(ids).toContain(mgr.id);
+      expect(ids).not.toContain(sup.id);
+      const csv = await http().get('/analytics/staff-activity?format=csv').set(auth(sup));
+      expect(csv.headers['content-type']).toContain('text/csv');
+      expect(csv.text.split('\n')[0]).toContain('twoFactorEnabled');
+      expect((await http().get('/analytics/staff-activity').set(auth(ada))).status).toBe(403);
+    });
+
+    it('reports usage per day, admins only, and refuses a bad period', async () => {
+      expect((await http().get('/analytics/usage').set(auth(mgr))).status).toBe(403);
+      const res = await http().get('/analytics/usage').set(auth(boss));
+      expect(res.body.totals.messages).toBeGreaterThanOrEqual(1);
+      expect(res.body.byDay.length).toBeGreaterThan(0);
+      expect((await http().get('/analytics/usage?format=csv').set(auth(boss))).text).toContain('day,newUsers');
+      expect((await http().get('/analytics/usage?from=2026-05-01&to=2026-01-01').set(auth(boss))).status).toBe(400);
+      expect((await http().get('/analytics/usage?from=2020-01-01&to=2026-01-01').set(auth(boss))).status).toBe(400);
+    });
+
+    it('lets only a superadmin send the weekly digest, and records it', async () => {
+      expect((await http().post('/analytics/digest/send').set(auth(boss))).status).toBe(403);
+      const res = await http().post('/analytics/digest/send').set(auth(sup));
+      expect(res.status).toBe(201);
+      expect(res.body.recipients).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

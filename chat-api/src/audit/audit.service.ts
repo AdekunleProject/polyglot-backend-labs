@@ -14,6 +14,8 @@ export type AuditAction =
   | 'user.view_messages'
   | 'user.block'
   | 'user.report'
+  | 'report.view'
+  | 'digest.sent'
   | 'report.verify'
   | 'report.decide'
   | 'wallet.freeze'
