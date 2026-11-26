@@ -97,7 +97,7 @@ The digest is an email to every active superadmin, sent on `DIGEST_DAY` after `D
 
 ## Architecture at a glance
 
-A request passes through the rate limiter and global validation, then a JWT guard (which checks the account in the database) and a roles guard, and reaches a controller. Controllers hand the work to services, which use TypeORM and raw SQL. Staff actions write an audit entry with the reason.
+A request passes through the rate limiter and global validation, then a JWT guard (which checks the account in the database) and a roles guard, and reaches a controller. Controllers hand the work to services, which use TypeORM repositories and query builders. Staff actions write an audit entry with the reason.
 
 The schema changes only through migrations (`synchronize` is off), and the migrations run on start in Docker.
 
