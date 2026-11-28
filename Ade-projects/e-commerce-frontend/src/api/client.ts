@@ -6,10 +6,11 @@ export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefin
 const ACCESS = 'hsa_access_token';
 const REFRESH = 'hsa_refresh_token';
 
+const memory = new Map<string, string>();
 const store = {
-  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
-  del: (k: string) => { try { localStorage.removeItem(k); } catch { /* storage blocked */ } },
+  get: (k: string) => { try { return localStorage.getItem(k) ?? memory.get(k) ?? null; } catch { return memory.get(k) ?? null; } },
+  set: (k: string, v: string) => { memory.set(k, v); try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
+  del: (k: string) => { memory.delete(k); try { localStorage.removeItem(k); } catch { /* storage blocked */ } },
 };
 
 export const tokenStore = {
