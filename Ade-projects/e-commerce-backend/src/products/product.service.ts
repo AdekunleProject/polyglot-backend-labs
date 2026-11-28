@@ -165,9 +165,11 @@ export class ProductsService {
     if ((product.images?.length ?? 0) + images.length > 10) {
       throw new BadRequestException('A product can have at most 10 images.');
     }
+    const uploaded: string[] = [];
     for (const image of images) {
-      product.images.push(await this.fileUpload.uploadFile(image, 'products'));
+      uploaded.push(await this.fileUpload.uploadFile(image, 'products'));
     }
+    product.images = [...(product.images ?? []), ...uploaded];
     await product.save();
     return product;
   }
