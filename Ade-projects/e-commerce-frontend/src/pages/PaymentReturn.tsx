@@ -1,97 +1,52 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { getMyPayments, Payment } from '../api/payments';
-
-// Paystack redirects the browser back here after checkout (configure this
-// route as the payment's callback_url — see README). Actual confirmation
-// happens server-side via Paystack's webhook, so this page polls the
-// customer's payment records until the matching reference shows PAID
-// (or FAILED), rather than trying to verify anything itself — the verify
-// endpoint on the backend is admin-only.
-const POLL_INTERVAL_MS = 3000;
-const MAX_POLLS = 15;
+import { LuCircleCheck, LuCircleX, LuClock } from 'react-icons/lu';
+import { verifyPayment } from '../api/shop';
+import { errorMessage } from '../api/client';
+import { Spinner } from '../components/ui';
 
 export default function PaymentReturn() {
-  const [params] = useSearchParams();
-  const reference = params.get('reference') ?? params.get('trxref');
-  const [payment, setPayment] = useState<Payment | null>(null);
-  const [pollCount, setPollCount] = useState(0);
-  const [error, setError] = useState('');
+  const [sp] = useSearchParams();
+  const reference = sp.get('reference') || sp.get('trxref') || '';
+  const [state, setState] = useState<'checking' | 'paid' | 'failed' | 'unknown'>('checking');
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (!reference) {
-      setError('No payment reference was returned.');
-      return;
-    }
-
-    let cancelled = false;
-
-    const poll = async () => {
+    if (!reference) { setState('unknown'); setMessage('We could not find a payment reference in this link.'); return; }
+    let tries = 0;
+    let alive = true;
+    const check = async () => {
       try {
-        const payments = await getMyPayments();
-        const match = payments.find((p) => p.transactionReference === reference) ?? null;
-        if (cancelled) return;
-        setPayment(match);
-        if (!match || match.status === 'PENDING') {
-          setPollCount((c) => c + 1);
-        }
-      } catch {
-        if (!cancelled) setError('Could not check payment status.');
-      }
+        const r = await verifyPayment(reference);
+        if (!alive) return;
+        const s = String(r.status ?? '').toUpperCase();
+        if (s === 'PAID' || s === 'SUCCESS') { setState('paid'); return; }
+        if (s === 'FAILED') { setState('failed'); setMessage('The payment was not completed.'); return; }
+        if (++tries < 4) setTimeout(check, 2500); else { setState('unknown'); setMessage('We have not received confirmation yet. It can take a minute. Check your orders shortly.'); }
+      } catch (e) { if (alive) { setState('unknown'); setMessage(errorMessage(e)); } }
     };
-
-    poll();
-    const interval = setInterval(() => {
-      if (pollCount >= MAX_POLLS) return;
-      poll();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void check();
+    return () => { alive = false; };
   }, [reference]);
 
-  const stillPending = !payment || payment.status === 'PENDING';
-  const timedOut = pollCount >= MAX_POLLS && stillPending;
+  const view = {
+    checking: { icon: <Spinner className="text-4xl text-brand-600" />, title: 'Confirming your payment', tone: 'bg-brand-50' },
+    paid: { icon: <LuCircleCheck className="text-5xl text-emerald-500" />, title: 'Payment received', tone: 'bg-emerald-50' },
+    failed: { icon: <LuCircleX className="text-5xl text-rose-500" />, title: 'Payment not completed', tone: 'bg-rose-50' },
+    unknown: { icon: <LuClock className="text-5xl text-amber-500" />, title: 'Still waiting', tone: 'bg-amber-50' },
+  }[state];
 
   return (
-    <div className="max-w-md mx-auto px-4 sm:px-6 py-24 text-center">
-      <div className="ticket p-8">
-        <p className="label-eyebrow mb-4">Payment Confirmation</p>
-
-        {error ? (
-          <p className="text-warnred font-mono text-sm">{error}</p>
-        ) : timedOut ? (
-          <>
-            <p className="font-mono text-sm mb-4">
-              Still waiting on confirmation from the payment provider. This can take a minute — check your
-              payment records shortly.
-            </p>
-            <Link to="/payments" className="btn-secondary inline-block">
-              View Payment Records
-            </Link>
-          </>
-        ) : stillPending ? (
-          <p className="label-eyebrow">Confirming your payment&hellip;</p>
-        ) : payment?.status === 'PAID' ? (
-          <>
-            <p className="stamp inline-block border-okgreen text-okgreen mb-4">Paid</p>
-            <p className="font-mono text-sm mb-4">Payment confirmed. Your order is being processed.</p>
-            <Link to="/orders" className="btn-primary inline-block">
-              View My Orders
-            </Link>
-          </>
-        ) : (
-          <>
-            <p className="stamp inline-block border-warnred text-warnred mb-4">{payment?.status}</p>
-            <p className="font-mono text-sm mb-4">This payment did not complete successfully.</p>
-            <Link to="/orders" className="btn-secondary inline-block">
-              Back to Orders
-            </Link>
-          </>
-        )}
+    <div className="container-x grid min-h-[60vh] place-items-center py-12">
+      <div className="card-pad w-full max-w-md text-center">
+        <div className={`mx-auto mb-5 grid h-24 w-24 place-items-center rounded-full ${view.tone}`}>{view.icon}</div>
+        <h1 className="font-display text-2xl font-extrabold">{view.title}</h1>
+        {state === 'paid' && <p className="mt-2 text-mute">Thank you. We are getting your order ready. Reference <span className="font-mono text-xs">{reference}</span></p>}
+        {message && <p className="mt-2 text-mute">{message}</p>}
+        <div className="mt-7 flex flex-col gap-2 sm:flex-row sm:justify-center">
+          <Link to="/orders" className="btn-primary">View my orders</Link>
+          <Link to="/shop" className="btn-ghost">Keep shopping</Link>
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,46 @@
+name: ecommerce-frontend
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Ade-projects/e-commerce-frontend/**'
+      - '.github/workflows/ecommerce-frontend.yaml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'Ade-projects/e-commerce-frontend/**'
+      - '.github/workflows/ecommerce-frontend.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Ade-projects/e-commerce-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
+        env:
+          VITE_API_URL: http://localhost:5000
+
+      - name: Demo build
+        run: VITE_DEMO=true npx vite build --mode demo --outDir dist-demo
+
+      - name: Docker image
+        run: docker build --build-arg VITE_API_URL=http://localhost:5000 -t harlim-shopall-frontend .

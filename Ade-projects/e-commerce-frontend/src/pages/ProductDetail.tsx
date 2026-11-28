@@ -1,172 +1,148 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { getProduct, listProducts } from '../api/products';
-import { listVariantsForProduct } from '../api/variants';
-import type { Product, ProductVariant } from '../types';
-import VariantPicker from '../components/VariantPicker';
-import ProductCard from '../components/ProductCard';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { LuMinus, LuPlus, LuRotateCcw, LuShieldCheck, LuShoppingBag, LuTruck } from 'react-icons/lu';
+import { getProduct, listProducts, listVariants } from '../api/catalog';
+import { errorMessage } from '../api/client';
+import { Breadcrumb, ErrorState, PageLoader, SectionHead, Spinner, useAsync } from '../components/ui';
+import { ProductCard, ProductImage } from '../components/ProductCard';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { extractErrorMessage } from '../api/client';
+import { useToast } from '../context/ToastContext';
+import { idOf, money, nameOf, priceOf } from '../lib/format';
 
 export default function ProductDetail() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const { id = '' } = useParams();
+  const nav = useNavigate();
   const { user } = useAuth();
-  const { addItem } = useCart();
+  const cart = useCart();
+  const toast = useToast();
 
-  const [product, setProduct] = useState<Product | null>(null);
-  const [variants, setVariants] = useState<ProductVariant[]>([]);
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
-  const [quantity, setQuantity] = useState(1);
-  const [activeImage, setActiveImage] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [status, setStatus] = useState('');
-  const [related, setRelated] = useState<Product[]>([]);
-
-  useEffect(() => {
-    if (!id) return;
-    setLoading(true);
-    Promise.all([getProduct(id), listVariantsForProduct(id)])
-      .then(([prod, vars]) => {
-        setProduct(prod);
-        setVariants(vars);
-        setSelectedVariant(vars.find((v) => v.stock > 0) ?? vars[0] ?? null);
-
-        // "You might also like" — same brand when available, otherwise
-        // just other current products. No dedicated "related products"
-        // endpoint exists on the backend.
-        const brandId = typeof prod.brand === 'object' ? prod.brand?._id : prod.brand;
-        listProducts({ brand: brandId || undefined, limit: 5 })
-          .then((res) => setRelated(res.data.filter((p) => p._id !== id).slice(0, 4)))
-          .catch(() => setRelated([]));
-      })
-      .catch((err) => setError(extractErrorMessage(err, 'Could not load this item.')))
-      .finally(() => setLoading(false));
+  const product = useAsync(() => getProduct(id), [id]);
+  const variants = useAsync(() => listVariants(id), [id]);
+  const related = useAsync(async () => {
+    const p = await getProduct(id);
+    const r = await listProducts({ category: idOf(p.category), limit: 5 });
+    return r.data.filter((x) => x._id !== id).slice(0, 4);
   }, [id]);
 
-  const handleAddToCart = async () => {
-    if (!user) {
-      navigate('/login', { state: { from: { pathname: `/products/${id}` } } });
-      return;
-    }
-    if (!selectedVariant) return;
-    setStatus('');
+  const [chosen, setChosen] = useState<Record<string, string>>({});
+  const [qty, setQty] = useState(1);
+  const [img, setImg] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  const list = variants.data ?? [];
+  const keys = useMemo(() => [...new Set(list.flatMap((v) => Object.keys(v.attributes ?? {})))], [list]);
+  const optionsFor = (k: string) => [...new Set(list.map((v) => v.attributes?.[k]).filter(Boolean))] as string[];
+
+  useEffect(() => {
+    if (!list.length) return;
+    const first = list.find((v) => v.stock > 0) ?? list[0];
+    setChosen({ ...first.attributes });
+    setQty(1); setImg(0);
+  }, [id, variants.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selected = list.find((v) => keys.every((k) => v.attributes?.[k] === chosen[k]));
+  const p = product.data;
+  const price = priceOf(selected, p ?? undefined);
+  const inStock = (selected?.stock ?? 0) > 0;
+  const available = (k: string, value: string) => list.some((v) => v.stock > 0 && v.attributes?.[k] === value && keys.every((o) => o === k || !chosen[o] || v.attributes?.[o] === chosen[o]));
+
+  if (product.loading) return <PageLoader label="Loading product" />;
+  if (product.error || !p) return <div className="container-x py-12"><ErrorState error={product.error ?? new Error('Not found')} onRetry={product.reload} /></div>;
+
+  const images = (selected?.images?.length ? selected.images : p.images) ?? [];
+  const gallery = images.length ? images : [''];
+
+  const addToCart = async (buyNow = false) => {
+    if (!user) { nav('/login', { state: { from: `/product/${id}` } }); return; }
+    if (!selected) { toast.error('Choose an option first.'); return; }
+    setBusy(true);
     try {
-      await addItem(selectedVariant._id, quantity);
-      setStatus('Added to cart.');
-    } catch (err) {
-      setStatus(extractErrorMessage(err, 'Could not add item to cart.'));
-    }
+      await cart.add(selected._id, qty);
+      toast.success(`${p.name} added to your cart.`);
+      if (buyNow) nav('/cart');
+    } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(false); }
   };
-
-  if (loading) {
-    return <div className="max-w-6xl mx-auto px-6 py-24 label-eyebrow">Loading product&hellip;</div>;
-  }
-
-  if (error || !product) {
-    return <div className="max-w-6xl mx-auto px-6 py-24 text-warnred font-mono">{error || 'Item not found.'}</div>;
-  }
-
-  const images = product.images?.length ? product.images : [];
-  const brandName = typeof product.brand === 'object' ? product.brand?.name : undefined;
+  const staff = user && user.role !== 'customer';
 
   return (
-    <div>
-      <div className="bg-manila/60 border-b border-black/5">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 text-sm text-inkfaint">
-          <a href="/" className="hover:text-rust">
-            All Products
-          </a>
-          {brandName && (
-            <>
-              <span className="mx-2">/</span>
-              <span>{brandName}</span>
-            </>
-          )}
-          <span className="mx-2">/</span>
-          <span className="text-ink">{product.name}</span>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 grid md:grid-cols-2 gap-10">
+    <div className="container-x py-8 sm:py-10">
+      <Breadcrumb items={[{ label: 'Shop', to: '/shop' }, ...(nameOf(p.category) ? [{ label: nameOf(p.category), to: `/shop?category=${idOf(p.category)}` }] : []), { label: p.name }]} />
+      <div className="grid gap-8 lg:grid-cols-2 lg:gap-14">
         <div>
-          <div className="aspect-square bg-manila/40 rounded-xl mb-3 overflow-hidden">
-            {images[activeImage] ? (
-              <img src={images[activeImage]} alt={product.name} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center label-eyebrow">No Image</div>
-            )}
-          </div>
-          {images.length > 1 && (
-            <div className="flex gap-2">
-              {images.map((img, i) => (
-                <button
-                  key={img + i}
-                  onClick={() => setActiveImage(i)}
-                  className={`w-16 h-16 rounded-lg border-2 overflow-hidden ${
-                    i === activeImage ? 'border-rust' : 'border-transparent'
-                  }`}
-                >
-                  <img src={img} alt="" className="w-full h-full object-cover" />
+          <div className="card aspect-square overflow-hidden"><ProductImage product={{ name: p.name, images: gallery.filter(Boolean) }} index={Math.min(img, gallery.length - 1)} /></div>
+          {gallery.length > 1 && (
+            <div className="mt-3 grid grid-cols-5 gap-3">
+              {gallery.map((src, i) => (
+                <button key={i} onClick={() => setImg(i)} aria-label={`Image ${i + 1}`} className={`aspect-square overflow-hidden rounded-xl border-2 transition ${i === img ? 'border-brand-500 shadow-glow' : 'border-transparent opacity-70 hover:opacity-100'}`}>
+                  <img src={src} alt="" className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        <div className="ticket p-6">
-          {brandName && <p className="label-eyebrow mb-1">{brandName}</p>}
-          <h1 className="text-3xl sm:text-4xl font-display font-800 leading-tight mb-2">{product.name}</h1>
-          <p className="sku mb-4">SKU {product.sku}</p>
-
-          <p className="font-display text-2xl font-700 text-rust mb-6">
-            ${(selectedVariant?.price ?? product.price).toFixed(2)}
-          </p>
-
-          {product.description && <p className="text-sm text-inkfaint mb-6 leading-relaxed">{product.description}</p>}
-
-          <div className="dashed-rule pt-6 mb-6">
-            <VariantPicker variants={variants} selected={selectedVariant} onSelect={setSelectedVariant} />
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            {nameOf(p.brand) && <Link to={`/shop?brand=${idOf(p.brand)}`} className="badge-violet">{nameOf(p.brand)}</Link>}
+            {p.featured && <span className="badge-amber">Featured</span>}
           </div>
+          <h1 className="mt-3 font-display text-3xl font-extrabold leading-tight sm:text-4xl">{p.name}</h1>
+          <p className="mt-4 font-display text-4xl font-extrabold gradient-text">{money(price)}</p>
+          <p className="mt-1 text-xs text-mute">SKU {selected?.sku ?? p.sku} · Delivery fee shown at checkout</p>
+          <p className="mt-6 leading-relaxed text-ink/75">{p.description}</p>
 
-          <div className="flex items-center gap-3 mb-4">
-            <label className="label-eyebrow" htmlFor="qty">
-              Qty
-            </label>
-            <input
-              id="qty"
-              type="number"
-              min={1}
-              max={selectedVariant?.stock ?? 1}
-              value={quantity}
-              onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
-              className="input-field w-20"
-            />
-          </div>
+          {variants.loading ? <div className="mt-6"><Spinner className="text-brand-600" /></div> : list.length === 0 ? (
+            <p className="mt-6 rounded-xl bg-amber-50 p-4 text-sm font-medium text-amber-700">This product has no purchasable options yet.</p>
+          ) : (
+            <div className="mt-7 space-y-5">
+              {keys.map((k) => (
+                <div key={k}>
+                  <p className="label">{k}: <span className="normal-case tracking-normal text-ink">{chosen[k]}</span></p>
+                  <div className="flex flex-wrap gap-2">
+                    {optionsFor(k).map((o) => (
+                      <button key={o} onClick={() => setChosen((c) => ({ ...c, [k]: o }))} aria-pressed={chosen[k] === o}
+                        className={`min-w-12 rounded-xl border px-4 py-2 text-sm font-semibold transition ${chosen[k] === o ? 'border-brand-600 bg-brand-50 text-brand-700 ring-2 ring-brand-200' : 'border-line bg-white hover:border-brand-300'} ${available(k, o) ? '' : 'opacity-45 line-through'}`}>{o}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
 
-          <button
-            className="btn-primary w-full"
-            disabled={!selectedVariant || selectedVariant.stock === 0}
-            onClick={handleAddToCart}
-          >
-            {selectedVariant?.stock === 0 ? 'Out of Stock' : 'Add to Cart'}
-          </button>
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="inline-flex items-center rounded-xl border border-line bg-white">
+                  <button className="grid h-11 w-11 place-items-center text-lg hover:text-brand-600 disabled:opacity-40" disabled={qty <= 1} onClick={() => setQty(qty - 1)} aria-label="Decrease quantity"><LuMinus /></button>
+                  <span className="w-10 text-center font-semibold" aria-live="polite">{qty}</span>
+                  <button className="grid h-11 w-11 place-items-center text-lg hover:text-brand-600 disabled:opacity-40" disabled={qty >= (selected?.stock ?? 1)} onClick={() => setQty(qty + 1)} aria-label="Increase quantity"><LuPlus /></button>
+                </div>
+                <p className={`text-sm font-semibold ${!selected ? 'text-mute' : inStock ? ((selected.stock <= 5) ? 'text-amber-600' : 'text-emerald-600') : 'text-rose-600'}`}>
+                  {!selected ? 'This combination is unavailable' : inStock ? (selected.stock <= 5 ? `Only ${selected.stock} left` : 'In stock') : 'Out of stock'}
+                </p>
+              </div>
 
-          {status && <p className="text-sm mt-3 text-okgreen">{status}</p>}
+              {staff ? (
+                <p className="rounded-xl bg-brand-50 p-4 text-sm font-medium text-brand-800">You are signed in as staff. Customers buy from this page; staff manage it in the console.</p>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  <button className="btn-primary btn-lg flex-1 sm:flex-none" disabled={!inStock || busy} onClick={() => addToCart(false)}>{busy ? <Spinner /> : <LuShoppingBag />} Add to cart</button>
+                  <button className="btn-dark btn-lg" disabled={!inStock || busy} onClick={() => addToCart(true)}>Buy now</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <ul className="mt-8 grid gap-3 border-t border-line pt-6 text-sm sm:grid-cols-3">
+            <li className="flex items-center gap-2"><LuTruck className="text-lg text-brand-600" /> Tracked delivery</li>
+            <li className="flex items-center gap-2"><LuRotateCcw className="text-lg text-brand-600" /> 24h refund cover</li>
+            <li className="flex items-center gap-2"><LuShieldCheck className="text-lg text-brand-600" /> Secure checkout</li>
+          </ul>
         </div>
       </div>
 
-      {related.length > 0 && (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
-          <h2 className="text-xl sm:text-2xl font-display font-700 mb-4">You Might Also Like</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-5">
-            {related.map((p) => (
-              <ProductCard key={p._id} product={p} />
-            ))}
-          </div>
-        </div>
+      {(related.data?.length ?? 0) > 0 && (
+        <section className="mt-20">
+          <SectionHead eyebrow="You may also like" title="Similar products" />
+          <div className="grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-4">{related.data!.map((x) => <ProductCard key={x._id} product={x} />)}</div>
+        </section>
       )}
     </div>
   );

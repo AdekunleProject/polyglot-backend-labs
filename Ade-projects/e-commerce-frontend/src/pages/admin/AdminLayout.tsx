@@ -1,156 +1,89 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { LuBadgeDollarSign, LuBoxes, LuChartColumn, LuClipboardList, LuExternalLink, LuLayoutDashboard, LuLogOut, LuMenu, LuPackage, LuRotateCcw, LuScrollText, LuTags, LuUsers, LuX } from 'react-icons/lu';
+import type { IconType } from 'react-icons';
+import { Logo } from '../../components/Logo';
+import { DemoBanner } from '../../components/Layout';
+import { useAuth } from '../../context/AuthContext';
+import { ROLE_LABEL } from '../../lib/format';
+import type { Role } from '../../types';
 
-const linkClass = ({ isActive }: { isActive: boolean }) =>
-  `flex items-center gap-3 px-5 py-3 text-sm font-medium transition-colors border-l-4 ${
-    isActive
-      ? 'border-rust bg-white/5 text-white'
-      : 'border-transparent text-white/60 hover:text-white hover:bg-white/5'
-  }`;
+interface Item { to: string; label: string; icon: IconType; roles: Role[]; end?: boolean }
 
-const navItems: [string, string, () => JSX.Element, boolean?][] = [
-  ['/admin', 'Dashboard', OverviewIcon, true],
-  ['/admin/orders', 'Order Management', OrdersIcon],
-  ['/admin/users', 'Customers', UsersIcon],
-  ['/admin/categories', 'Categories', CategoryIcon],
-  ['/admin/payments', 'Transactions', CardIcon],
-  ['/admin/products', 'Product List', BoxIcon, true],
-  ['/admin/products/new', 'Add Product', PlusIcon],
-  ['/admin/brands', 'Brands', TagIcon],
+const ALL: Role[] = ['manager', 'admin', 'superadmin'];
+const ITEMS: Item[] = [
+  { to: '/admin', label: 'Overview', icon: LuLayoutDashboard, roles: ALL, end: true },
+  { to: '/admin/products', label: 'Products', icon: LuBoxes, roles: ['manager'] },
+  { to: '/admin/catalog', label: 'Brands & categories', icon: LuTags, roles: ALL },
+  { to: '/admin/orders', label: 'Orders', icon: LuPackage, roles: ALL },
+  { to: '/admin/payments', label: 'Payments', icon: LuBadgeDollarSign, roles: ['admin', 'superadmin'] },
+  { to: '/admin/refunds', label: 'Refunds', icon: LuRotateCcw, roles: ALL },
+  { to: '/admin/users', label: 'People', icon: LuUsers, roles: ALL },
+  { to: '/admin/reports', label: 'Reports', icon: LuChartColumn, roles: ALL },
+  { to: '/admin/audit', label: 'Audit log', icon: LuScrollText, roles: ['superadmin'] },
 ];
 
 export default function AdminLayout() {
-  return (
-    <div className="flex min-h-[calc(100vh-8rem)] -mx-4 sm:-mx-6 -my-0">
-      <aside className="w-56 shrink-0 bg-steel py-6 hidden md:flex md:flex-col">
-        <div className="px-5 mb-6">
-          <p className="text-white/40 text-[11px] font-display font-semibold uppercase tracking-wide">
-            Seller Admin
-          </p>
-        </div>
-        <nav className="space-y-1 flex-1">
-          {navItems.map(([to, label, Icon, end]) => (
-            <NavLink key={to} to={to} end={end} className={linkClass}>
-              <Icon /> {label}
-            </NavLink>
-          ))}
-        </nav>
-        <NavLink to="/profile" className={linkClass}>
-          <ProfileIcon /> My Profile
-        </NavLink>
-      </aside>
+  const { user, signOut } = useAuth();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setOpen(false); window.scrollTo({ top: 0 }); }, [loc.pathname]);
+  if (!user) return null;
+  const items = ITEMS.filter((i) => i.roles.includes(user.role));
+  const link = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition ${isActive ? 'bg-white/12 text-white shadow-inner ring-1 ring-white/15' : 'text-white/65 hover:bg-white/8 hover:text-white'}`;
 
-      <div className="flex-1 min-w-0 bg-cream px-4 sm:px-8 py-8">
-        {/* Mobile nav fallback */}
-        <nav className="md:hidden flex gap-2 overflow-x-auto mb-6 pb-2">
-          {navItems.map(([to, label, , end]) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                `whitespace-nowrap text-sm font-medium px-3 py-1.5 rounded-full border ${
-                  isActive ? 'border-rust text-rust' : 'border-black/10'
-                }`
-              }
-            >
-              {label}
-            </NavLink>
-          ))}
-          <NavLink
-            to="/profile"
-            className={({ isActive }) =>
-              `whitespace-nowrap text-sm font-medium px-3 py-1.5 rounded-full border ${
-                isActive ? 'border-rust text-rust' : 'border-black/10'
-              }`
-            }
-          >
-            My Profile
-          </NavLink>
-        </nav>
-        <Outlet />
+  const sidebar = (
+    <div className="flex h-full flex-col">
+      <div className="px-5 py-6"><Logo light to="/admin" /></div>
+      <p className="px-5 pb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">{ROLE_LABEL[user.role]} console</p>
+      <nav className="flex-1 space-y-1 px-3">
+        {items.map((i) => <NavLink key={i.to} to={i.to} end={i.end} className={link}><i.icon className="text-lg" />{i.label}</NavLink>)}
+      </nav>
+      <div className="m-3 space-y-1 rounded-2xl border border-white/10 bg-white/5 p-3">
+        <div className="flex items-center gap-3 px-1 pb-2">
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white">{user.firstname[0]}{user.lastname[0]}</span>
+          <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{user.firstname} {user.lastname}</p><p className="truncate text-xs text-white/50">{user.email}</p></div>
+        </div>
+        <Link to="/" className="flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-white/70 hover:bg-white/10 hover:text-white"><LuExternalLink /> View the store</Link>
+        <Link to="/account/security" className="flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-white/70 hover:bg-white/10 hover:text-white"><LuClipboardList /> Profile & security</Link>
+        <button onClick={async () => { await signOut(); nav('/login'); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-white/70 hover:bg-white/10 hover:text-white"><LuLogOut /> Sign out</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen">
+      <DemoBanner />
+      <div className="lg:flex">
+        <aside className="hero-bg sticky top-0 hidden h-screen w-64 shrink-0 lg:block">{sidebar}</aside>
+        <div className="min-w-0 flex-1">
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-white/85 px-4 py-3 backdrop-blur lg:hidden">
+            <Logo compact />
+            <button onClick={() => setOpen(true)} aria-label="Open menu" className="grid h-10 w-10 place-items-center rounded-xl border border-line text-xl"><LuMenu /></button>
+          </header>
+          {open && (
+            <div className="fixed inset-0 z-50 lg:hidden">
+              <div className="absolute inset-0 bg-night-950/60" onClick={() => setOpen(false)} />
+              <div className="hero-bg absolute inset-y-0 left-0 w-72 animate-rise">
+                <button onClick={() => setOpen(false)} aria-label="Close menu" className="absolute right-3 top-4 text-2xl text-white/70"><LuX /></button>
+                {sidebar}
+              </div>
+            </div>
+          )}
+          <main className="mx-auto max-w-7xl px-4 py-7 sm:px-8"><Outlet /></main>
+        </div>
       </div>
     </div>
   );
 }
 
-function iconProps() {
-  return { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8 };
-}
-function OverviewIcon() {
+export function PageHead({ title, sub, action }: { title: string; sub?: string; action?: React.ReactNode }) {
   return (
-    <svg {...iconProps()}>
-      <rect x="3" y="3" width="7" height="9" rx="1" />
-      <rect x="14" y="3" width="7" height="5" rx="1" />
-      <rect x="14" y="12" width="7" height="9" rx="1" />
-      <rect x="3" y="16" width="7" height="5" rx="1" />
-    </svg>
-  );
-}
-function BoxIcon() {
-  return (
-    <svg {...iconProps()}>
-      <path d="M21 8l-9-5-9 5 9 5 9-5z" />
-      <path d="M3 8v8l9 5 9-5V8" />
-      <path d="M12 13v8" />
-    </svg>
-  );
-}
-function TagIcon() {
-  return (
-    <svg {...iconProps()}>
-      <path d="M20.6 12.6 12 21.2 2.8 12l8.6-8.6H20a1 1 0 0 1 1 1v8.2z" />
-      <circle cx="16" cy="8" r="1.2" />
-    </svg>
-  );
-}
-function OrdersIcon() {
-  return (
-    <svg {...iconProps()}>
-      <path d="M9 2h6l1 4H8l1-4z" />
-      <path d="M4 6h16l-1.5 14a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1L4 6z" />
-    </svg>
-  );
-}
-function CardIcon() {
-  return (
-    <svg {...iconProps()}>
-      <rect x="2" y="5" width="20" height="14" rx="2" />
-      <path d="M2 10h20" />
-    </svg>
-  );
-}
-function UsersIcon() {
-  return (
-    <svg {...iconProps()}>
-      <circle cx="9" cy="8" r="3.5" />
-      <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
-      <circle cx="18" cy="9" r="2.5" />
-      <path d="M15.5 20a4.5 4.5 0 0 1 6.7-3.9" />
-    </svg>
-  );
-}
-function CategoryIcon() {
-  return (
-    <svg {...iconProps()}>
-      <rect x="3" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="3" width="7" height="7" rx="1" />
-      <rect x="3" y="14" width="7" height="7" rx="1" />
-      <rect x="14" y="14" width="7" height="7" rx="1" />
-    </svg>
-  );
-}
-function ProfileIcon() {
-  return (
-    <svg {...iconProps()}>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21a8 8 0 0 1 16 0" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg {...iconProps()}>
-      <path d="M12 5v14M5 12h14" />
-    </svg>
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div><h1 className="font-display text-2xl font-extrabold sm:text-3xl">{title}</h1>{sub && <p className="mt-1 text-sm text-mute">{sub}</p>}</div>
+      {action}
+    </div>
   );
 }

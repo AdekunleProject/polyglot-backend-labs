@@ -20,7 +20,7 @@ import {
 import { decryptSecret, encryptSecret } from './secret-box';
 import { generateTotpSecret, otpauthUrl, verifyTotp } from './totp';
 
-const ISSUER = 'Duka';
+const ISSUER = 'Harlim ShopAll';
 const CHALLENGE_TTL = '5m';
 
 @Injectable()

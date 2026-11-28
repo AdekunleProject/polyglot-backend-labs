@@ -1,27 +1,33 @@
-export type Role = 'CUSTOMER' | 'ADMIN';
+export type Role = 'superadmin' | 'admin' | 'manager' | 'customer';
+export type Restriction = 'change-password' | 'two-factor';
 
 export interface User {
   id: string;
-  _id?: string;
   firstname: string;
   lastname: string;
   email: string;
   role: Role;
   profileImage?: string;
+  restriction?: Restriction;
 }
 
-export interface Brand {
-  _id: string;
-  name: string;
-  logo?: string;
-  slug?: string;
+export interface Profile extends User {
+  _id?: string;
+  middlename?: string;
+  phoneNumber?: string;
+  address?: string;
+  gender?: string;
+  dateOfBirth?: string;
+  isVerified?: boolean;
+  twoFactorEnabled?: boolean;
+  isActive?: boolean;
+  deactivatedAt?: string | null;
+  deletedAt?: string | null;
+  createdAt?: string;
 }
 
-export interface Category {
-  _id: string;
-  name: string;
-  slug?: string;
-}
+export interface Brand { _id: string; name: string; description?: string }
+export interface Category { _id: string; name: string; description?: string }
 
 export interface Product {
   _id: string;
@@ -30,14 +36,16 @@ export interface Product {
   sku: string;
   description?: string;
   price: number;
-  images: string[];
+  discountPrice?: number;
+  images?: string[];
   brand?: Brand | string;
   category?: Category | string;
   featured?: boolean;
   isActive: boolean;
+  createdAt?: string;
 }
 
-export interface ProductVariant {
+export interface Variant {
   _id: string;
   product: string | Product;
   sku: string;
@@ -48,30 +56,14 @@ export interface ProductVariant {
   isActive?: boolean;
 }
 
-export interface PaginationMeta {
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
+export interface Meta { total: number; page: number; limit: number; totalPages: number }
+export interface Paginated<T> { data: T[]; meta: Meta }
 
-export interface Paginated<T> {
-  data: T[];
-  meta: PaginationMeta;
-}
+export interface CartItem { variant: Variant | string; quantity: number }
+export interface Cart { _id?: string; items: CartItem[] }
 
-export interface CartItem {
-  variant: ProductVariant | string;
-  quantity: number;
-}
-
-export interface Cart {
-  _id?: string;
-  items: CartItem[];
-}
-
-export type OrderStatus = 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
+export type OrderStatus = 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+export type OrderPaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 
 export interface OrderItem {
   productId: string;
@@ -98,12 +90,96 @@ export interface ShippingAddress {
 
 export interface Order {
   _id: string;
-  user: string;
+  user: string | { _id: string; firstname?: string; lastname?: string; email?: string };
   items: OrderItem[];
   shippingAddress: ShippingAddress;
   subtotal: number;
   total: number;
   status: OrderStatus;
-  paymentStatus: PaymentStatus;
+  paymentStatus: OrderPaymentStatus;
+  deliveredAt?: string | null;
   createdAt: string;
+  updatedAt?: string;
+}
+
+export type PaymentStatus = 'PENDING' | 'AWAITING_CONFIRMATION' | 'PAID' | 'FAILED' | 'REFUNDED';
+export interface Payment {
+  _id: string;
+  order: string | { _id: string };
+  user?: string | { _id: string; firstname?: string; lastname?: string; email?: string };
+  amount: number;
+  currency: string;
+  provider: 'PAYSTACK' | 'BANK_TRANSFER';
+  status: PaymentStatus;
+  transactionReference: string;
+  receipt?: string;
+  receiptUrl?: string;
+  bankName?: string;
+  accountName?: string;
+  accountNumber?: string;
+  refundedAmount?: number;
+  createdAt: string;
+}
+
+export type RefundStatus =
+  | 'SUBMITTED' | 'VERIFIED' | 'REJECTED' | 'DECLINED' | 'REFUNDED'
+  | 'REPLACEMENT_APPROVED' | 'REPLACEMENT_SENT';
+export interface Refund {
+  id: string;
+  order: string;
+  user?: string;
+  type: 'DEFECT' | 'CANCELLATION';
+  resolution: 'REFUND' | 'REPLACEMENT';
+  reason: string;
+  evidence: string[];
+  evidenceCount: number;
+  amount: number;
+  status: RefundStatus;
+  verificationNote?: string | null;
+  decisionNote?: string | null;
+  createdAt: string;
+}
+
+export interface Page<T> { items: T[]; total: number; page: number; limit: number }
+
+export interface AppNotification {
+  _id: string;
+  type: string;
+  title: string;
+  message: string;
+  link?: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface AuditEntry {
+  _id: string;
+  actorId?: string | null;
+  action: string;
+  target?: { type: string; id: string } | null;
+  details?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface StaffRow {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  isActive: boolean;
+  twoFactorEnabled: boolean;
+  totalActions: number;
+  lastActionAt: string | null;
+  deletes: number;
+  lookups: number;
+  offHoursActions: number;
+  flags: string[];
+  actions: Record<string, number>;
+}
+
+export interface SalesReport {
+  from: string;
+  to: string;
+  totals: { orders: number; payments: number; revenue: number; refunds: number; refundedAmount: number; newCustomers: number };
+  byDay: { day: string; orders: number; payments: number; revenue: number }[];
 }

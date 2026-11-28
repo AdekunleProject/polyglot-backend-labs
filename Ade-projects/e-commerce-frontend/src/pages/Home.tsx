@@ -1,238 +1,151 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { listProducts, ProductQuery } from '../api/products';
-import { listBrands } from '../api/brands';
-import type { Brand, Category, Product } from '../types';
-import ProductCard from '../components/ProductCard';
-import { extractErrorMessage } from '../api/client';
+import { Link } from 'react-router-dom';
+import { LuArrowRight, LuHeadphones, LuRotateCcw, LuShieldCheck, LuSparkles, LuTruck, LuWatch, LuSmartphone, LuLaptop, LuShirt, LuHouse, LuFootprints, LuBriefcase, LuFlower } from 'react-icons/lu';
+import { listBrands, listCategories, listProducts } from '../api/catalog';
+import { ErrorState, SectionHead, useAsync } from '../components/ui';
+import { ProductCard, ProductGridSkeleton, ProductImage } from '../components/ProductCard';
+import { money } from '../lib/format';
+import type { Product } from '../types';
 
-function categoryInfo(c: Product['category']): { id: string; name: string } | null {
-  if (!c || typeof c !== 'object') return null;
-  const cat = c as Category;
-  return { id: cat._id, name: cat.name };
+const CAT_ICONS: Record<string, JSX.Element> = {
+  'Phones & Tablets': <LuSmartphone />, Computing: <LuLaptop />, Audio: <LuHeadphones />, Watches: <LuWatch />,
+  Fashion: <LuShirt />, Footwear: <LuFootprints />, 'Home & Living': <LuHouse />, Beauty: <LuFlower />, Bags: <LuBriefcase />,
+};
+const CAT_TONES = ['from-violet-500 to-fuchsia-500', 'from-sky-500 to-indigo-500', 'from-rose-500 to-orange-400', 'from-emerald-500 to-sky-500', 'from-fuchsia-500 to-pink-500', 'from-amber-500 to-rose-500', 'from-teal-500 to-indigo-500', 'from-pink-500 to-violet-500', 'from-slate-600 to-violet-600'];
+
+function Hero({ picks, products, categories }: { picks: Product[]; products?: number; categories?: number }) {
+  return (
+    <section className="hero-bg relative isolate overflow-hidden text-white">
+      <div className="grid-lines absolute inset-0 -z-10" />
+      <div className="absolute -left-24 top-10 -z-10 h-72 w-72 animate-drift rounded-full bg-brand-600/40 blur-3xl" />
+      <div className="absolute -right-10 bottom-0 -z-10 h-80 w-80 animate-drift rounded-full bg-flame-500/30 blur-3xl [animation-delay:-6s]" />
+      <div className="container-x grid items-center gap-12 py-16 sm:py-20 lg:grid-cols-[1.05fr_.95fr] lg:py-28">
+        <div className="animate-rise">
+          <span className="glass inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-white/90">
+            <LuSparkles className="text-gold-400" /> New season picks are here
+          </span>
+          <h1 className="mt-6 font-display text-5xl font-extrabold leading-[1.04] sm:text-6xl lg:text-7xl">
+            Everything you need,<br /><span className="gold-text">one place.</span>
+          </h1>
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-white/70">
+            Phones, fashion, home and more from brands you trust. Pay securely, track every step and get covered by Harlim buyer protection.
+          </p>
+          <div className="mt-9 flex flex-wrap gap-3">
+            <Link to="/shop" className="btn-primary btn-lg">Start shopping <LuArrowRight /></Link>
+            <Link to="/shop?featured=true" className="btn-light btn-lg">See featured</Link>
+          </div>
+          <dl className="mt-12 grid max-w-md grid-cols-3 gap-6">
+            {[[products ?? '—', 'Products'], [categories ?? '—', 'Categories'], ['72h', 'Fault cover']].map(([v, l]) => (
+              <div key={l}><dt className="font-display text-3xl font-bold">{v}</dt><dd className="text-xs uppercase tracking-wider text-white/55">{l}</dd></div>
+            ))}
+          </dl>
+        </div>
+
+        <div className="relative mx-auto hidden h-[460px] w-full max-w-lg lg:block">
+          {picks.slice(0, 3).map((p, i) => {
+            const pos = ['left-0 top-6 w-56 -rotate-6', 'right-0 top-0 w-60 rotate-6 [animation-delay:-2s]', 'left-16 bottom-0 w-64 rotate-2 [animation-delay:-4s]'][i];
+            return (
+              <Link key={p._id} to={`/product/${p._id}`} className={`glass absolute animate-float p-3 transition hover:scale-105 ${pos}`}>
+                <div className="aspect-square overflow-hidden rounded-xl"><ProductImage product={p} /></div>
+                <p className="mt-3 truncate font-display text-sm font-semibold">{p.name}</p>
+                <p className="text-sm font-bold text-gold-300">{money(p.price)}</p>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
 }
 
+const PERKS = [
+  { icon: <LuTruck />, title: 'Fast delivery', text: 'Tracked from our warehouse to your door.' },
+  { icon: <LuShieldCheck />, title: 'Secure payments', text: 'Card or bank transfer, confirmed in minutes.' },
+  { icon: <LuRotateCcw />, title: 'Buyer protection', text: 'Faulty item? Refund in 24h, replacement in 72h.' },
+  { icon: <LuHeadphones />, title: 'Real support', text: 'People who answer, six days a week.' },
+];
+
 export default function Home() {
-  const [searchParams] = useSearchParams();
-  const initialSearch = searchParams.get('search') ?? undefined;
-
-  const [products, setProducts] = useState<Product[]>([]);
-  const [featured, setFeatured] = useState<Product[]>([]);
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [categorySample, setCategorySample] = useState<Product[]>([]);
-  const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const [query, setQuery] = useState<ProductQuery>({
-    page: 1,
-    limit: 16,
-    sortBy: 'createdAt',
-    sortOrder: 'desc',
-    search: initialSearch,
-  });
-  const [searchInput, setSearchInput] = useState(initialSearch ?? '');
-
-  // Backend has no dedicated categories endpoint, so the category strip is
-  // derived from a larger sample of real products rather than a separate call.
-  useEffect(() => {
-    listBrands().then(setBrands).catch(() => setBrands([]));
-    listProducts({ limit: 60, sortBy: 'createdAt', sortOrder: 'desc' })
-      .then((res) => setCategorySample(res.data))
-      .catch(() => setCategorySample([]));
-    listProducts({ featured: true, limit: 10 })
-      .then((res) => setFeatured(res.data))
-      .catch(() => setFeatured([]));
-  }, []);
-
-  useEffect(() => {
-    setLoading(true);
-    setError('');
-    listProducts(query)
-      .then((res) => {
-        setProducts(res.data);
-        setTotalPages(res.meta?.totalPages ?? 1);
-      })
-      .catch((err) => setError(extractErrorMessage(err, 'Could not load products.')))
-      .finally(() => setLoading(false));
-  }, [query]);
-
-  const categories = useMemo(() => {
-    const byId = new Map<string, string>();
-    categorySample.forEach((p) => {
-      const info = categoryInfo(p.category);
-      if (info) byId.set(info.id, info.name);
-    });
-    return Array.from(byId, ([id, name]) => ({ id, name })).slice(0, 10);
-  }, [categorySample]);
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setQuery((q) => ({ ...q, search: searchInput || undefined, page: 1 }));
-  };
+  const featured = useAsync(() => listProducts({ featured: true, limit: 8 }), []);
+  const cats = useAsync(listCategories, []);
+  const brands = useAsync(listBrands, []);
+  const fresh = useAsync(() => listProducts({ limit: 4, sortBy: 'createdAt', sortOrder: 'desc' }), []);
 
   return (
-    <div>
-      {/* Hero */}
-      <section className="bg-steel">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-14 grid md:grid-cols-2 gap-8 items-center">
-          <div>
-            <p className="text-rust font-display font-semibold text-sm uppercase tracking-wide mb-2">
-              Everything, one cart
-            </p>
-            <h1 className="text-white text-4xl sm:text-5xl font-display font-800 leading-tight mb-4">
-              Order anything.
-              <br />
-              Delivered to your door.
-            </h1>
-            <p className="text-white/70 text-sm sm:text-base mb-6 max-w-md">
-              Browse thousands of products across every category, pay by card or bank transfer, and track it all
-              from one dashboard.
-            </p>
-            <a href="#browse" className="btn-primary inline-block">
-              Start Shopping
-            </a>
-          </div>
-          <div className="hidden md:grid grid-cols-3 gap-3">
-            {categories.slice(0, 6).map((cat) => (
-              <div
-                key={cat.id}
-                className="bg-white/10 rounded-xl p-4 text-white text-sm font-display font-semibold text-center flex items-center justify-center h-20"
-              >
-                {cat.name}
+    <>
+      <Hero picks={featured.data?.data ?? []} products={fresh.data?.meta.total} categories={cats.data?.length} />
+
+      <section className="container-x relative z-10 -mt-8">
+        <div className="card grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-4">
+          {PERKS.map((p) => (
+            <div key={p.title} className="flex items-start gap-3 rounded-xl p-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-xl text-brand-600">{p.icon}</span>
+              <div><p className="font-display text-sm font-bold">{p.title}</p><p className="text-xs leading-relaxed text-mute">{p.text}</p></div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="container-x mt-20">
+        <SectionHead eyebrow="Browse" title="Shop by category" action={<Link to="/shop" className="hidden text-sm font-semibold text-brand-600 hover:underline sm:block">View all →</Link>} />
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-5">
+          {(cats.data ?? []).map((c, i) => (
+            <Link key={c._id} to={`/shop?category=${c._id}`} className="group relative overflow-hidden rounded-2xl p-5 text-white shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift">
+              <div className={`absolute inset-0 bg-gradient-to-br ${CAT_TONES[i % CAT_TONES.length]}`} />
+              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/15 transition duration-500 group-hover:scale-150" />
+              <div className="relative">
+                <span className="text-3xl">{CAT_ICONS[c.name] ?? <LuSparkles />}</span>
+                <p className="mt-6 font-display text-base font-bold leading-tight">{c.name}</p>
+                <p className="mt-1 flex items-center gap-1 text-xs text-white/80 opacity-0 transition group-hover:opacity-100">Explore <LuArrowRight /></p>
               </div>
-            ))}
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section className="container-x mt-20">
+        <SectionHead eyebrow="Hand-picked" title="Featured this week" action={<Link to="/shop?featured=true" className="text-sm font-semibold text-brand-600 hover:underline">See all →</Link>} />
+        {featured.loading ? <ProductGridSkeleton /> : featured.error ? <ErrorState error={featured.error} onRetry={featured.reload} /> : (
+          <div className="grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-3 xl:grid-cols-4">
+            {featured.data!.data.slice(0, 8).map((p) => <ProductCard key={p._id} product={p} />)}
+          </div>
+        )}
+      </section>
+
+      <section className="container-x mt-20">
+        <div className="hero-bg relative isolate overflow-hidden rounded-3xl px-6 py-12 text-white sm:px-12 sm:py-16">
+          <div className="grid-lines absolute inset-0 -z-10 opacity-60" />
+          <div className="grid items-center gap-8 md:grid-cols-[1.2fr_1fr]">
+            <div>
+              <p className="eyebrow text-gold-300!">Buyer protection</p>
+              <h2 className="mt-2 font-display text-3xl font-extrabold sm:text-4xl">Shop with a safety net.</h2>
+              <p className="mt-4 max-w-lg text-white/70">If something arrives broken, tell us with a photo. Report it within 24 hours for a full refund, or within 72 hours for a free replacement. Cancel before it arrives and get 65% back.</p>
+              <Link to="/shop" className="btn-primary mt-7">Shop with confidence <LuArrowRight /></Link>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              {[['24h', 'Refund window'], ['72h', 'Replacement'], ['65%', 'Cancel refund']].map(([v, l]) => (
+                <div key={l} className="glass p-4"><p className="font-display text-2xl font-extrabold gold-text">{v}</p><p className="mt-1 text-[11px] uppercase tracking-wider text-white/60">{l}</p></div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Category strip */}
-      {categories.length > 0 && (
-        <section className="border-b border-black/5 bg-white">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex gap-2 overflow-x-auto">
-            <button
-              onClick={() => setQuery((q) => ({ ...q, category: undefined, page: 1 }))}
-              className={`whitespace-nowrap text-sm font-medium px-3 py-1.5 rounded-full border transition-colors ${
-                !query.category ? 'border-rust text-rust' : 'border-black/10 hover:border-rust hover:text-rust'
-              }`}
-            >
-              All
-            </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setQuery((q) => ({ ...q, category: cat.id, page: 1 }))}
-                className={`whitespace-nowrap text-sm font-medium px-3 py-1.5 rounded-full border transition-colors ${
-                  query.category === cat.id ? 'border-rust text-rust' : 'border-black/10 hover:border-rust hover:text-rust'
-                }`}
-              >
-                {cat.name}
-              </button>
+      <section className="container-x mt-20">
+        <SectionHead eyebrow="Just in" title="New arrivals" />
+        {fresh.loading ? <ProductGridSkeleton n={4} /> : (
+          <div className="grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-4">{(fresh.data?.data ?? []).map((p) => <ProductCard key={p._id} product={p} />)}</div>
+        )}
+      </section>
+
+      {(brands.data?.length ?? 0) > 0 && (
+        <section className="mt-20 overflow-hidden border-y border-line bg-white/60 py-6" aria-label="Brands">
+          <div className="flex w-max animate-marquee gap-14">
+            {[...(brands.data ?? []), ...(brands.data ?? [])].map((b, i) => (
+              <Link key={`${b._id}-${i}`} to={`/shop?brand=${b._id}`} className="font-display text-2xl font-bold text-ink/30 transition hover:text-brand-600">{b.name}</Link>
             ))}
           </div>
         </section>
       )}
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Featured picks */}
-        {featured.length > 0 && (
-          <section className="mb-10">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl sm:text-2xl font-display font-700">Top Picks</h2>
-              <span className="label-eyebrow text-rust">Featured</span>
-            </div>
-            <div className="flex gap-4 overflow-x-auto pb-2">
-              {featured.map((p) => (
-                <div key={p._id} className="w-40 sm:w-48 shrink-0">
-                  <ProductCard product={p} />
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Filters + grid */}
-        <section id="browse">
-          <div className="flex flex-col md:flex-row gap-3 mb-6">
-            <form onSubmit={handleSearchSubmit} className="flex-1 flex gap-2">
-              <input
-                className="input-field"
-                placeholder="Search products…"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
-              <button type="submit" className="btn-secondary whitespace-nowrap">
-                Search
-              </button>
-            </form>
-
-            <select
-              className="input-field md:w-52"
-              value={query.brand ?? ''}
-              onChange={(e) => setQuery((q) => ({ ...q, brand: e.target.value || undefined, page: 1 }))}
-            >
-              <option value="">All brands</option>
-              {brands.map((b) => (
-                <option key={b._id} value={b._id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              className="input-field md:w-52"
-              value={`${query.sortBy}:${query.sortOrder}`}
-              onChange={(e) => {
-                const [sortBy, sortOrder] = e.target.value.split(':') as [string, 'asc' | 'desc'];
-                setQuery((q) => ({ ...q, sortBy, sortOrder, page: 1 }));
-              }}
-            >
-              <option value="createdAt:desc">Newest arrivals</option>
-              <option value="price:asc">Price: low to high</option>
-              <option value="price:desc">Price: high to low</option>
-              <option value="name:asc">Name: A&ndash;Z</option>
-            </select>
-          </div>
-
-          {error && <p className="text-warnred text-sm mb-6">{error}</p>}
-
-          {loading ? (
-            <p className="label-eyebrow">Loading products…</p>
-          ) : products.length === 0 ? (
-            <div className="ticket p-10 text-center">
-              <p className="label-eyebrow">No products match your search.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
-              {products.map((p) => (
-                <ProductCard key={p._id} product={p} />
-              ))}
-            </div>
-          )}
-
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-4 mt-10">
-              <button
-                className="btn-secondary !px-4 !py-2"
-                disabled={(query.page ?? 1) <= 1}
-                onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 1) - 1 }))}
-              >
-                Prev
-              </button>
-              <span className="text-sm font-medium">
-                {query.page} / {totalPages}
-              </span>
-              <button
-                className="btn-secondary !px-4 !py-2"
-                disabled={(query.page ?? 1) >= totalPages}
-                onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 1) + 1 }))}
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </section>
-      </div>
-    </div>
+    </>
   );
 }

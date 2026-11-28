@@ -1,183 +1,132 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { listProducts, ProductQuery } from '../api/products';
-import { listBrands } from '../api/brands';
-import type { Brand, Category, Product } from '../types';
-import ProductCard from '../components/ProductCard';
-import { extractErrorMessage } from '../api/client';
+import { LuSearch, LuSlidersHorizontal, LuX } from 'react-icons/lu';
+import { listBrands, listCategories, listProducts, type ProductQuery } from '../api/catalog';
+import { EmptyState, ErrorState, Modal, Pager, useAsync } from '../components/ui';
+import { ProductCard, ProductGridSkeleton } from '../components/ProductCard';
 
-function categoryInfo(c: Product['category']): { id: string; name: string } | null {
-  if (!c || typeof c !== 'object') return null;
-  const cat = c as Category;
-  return { id: cat._id, name: cat.name };
-}
+const SORTS: { label: string; sortBy: NonNullable<ProductQuery['sortBy']>; sortOrder: 'asc' | 'desc' }[] = [
+  { label: 'Newest', sortBy: 'createdAt', sortOrder: 'desc' },
+  { label: 'Price: low to high', sortBy: 'price', sortOrder: 'asc' },
+  { label: 'Price: high to low', sortBy: 'price', sortOrder: 'desc' },
+  { label: 'Name: A to Z', sortBy: 'name', sortOrder: 'asc' },
+];
 
-// Dedicated catalog page with a sidebar of filters — separate from the
-// homepage's lighter "New Arrivals" showcase. Category/brand are
-// single-select radios rather than checkboxes, matching what the backend's
-// GET /products actually accepts (one category ID, one brand ID at a time)
-// rather than faking a multi-select the API can't honor.
 export default function Shop() {
-  const [searchParams] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
+  const get = (k: string) => sp.get(k) ?? '';
+  const page = Number(get('page')) || 1;
+  const sortIdx = Math.max(0, SORTS.findIndex((s) => `${s.sortBy}:${s.sortOrder}` === get('sort')));
+  const [search, setSearch] = useState(get('search'));
+  const [min, setMin] = useState(get('min'));
+  const [max, setMax] = useState(get('max'));
+  const [filters, setFilters] = useState(false);
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [categorySample, setCategorySample] = useState<Product[]>([]);
-  const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  useEffect(() => { setSearch(get('search')); setMin(get('min')); setMax(get('max')); }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [query, setQuery] = useState<ProductQuery>({
-    page: 1,
-    limit: 15,
-    sortBy: 'createdAt',
-    sortOrder: 'desc',
-    category: searchParams.get('category') ?? undefined,
-    search: searchParams.get('search') ?? undefined,
-  });
+  const cats = useAsync(listCategories, []);
+  const brands = useAsync(listBrands, []);
+  const query: ProductQuery = {
+    search: get('search') || undefined, category: get('category') || undefined, brand: get('brand') || undefined,
+    minPrice: get('min') ? Number(get('min')) : undefined, maxPrice: get('max') ? Number(get('max')) : undefined,
+    featured: get('featured') === 'true' ? true : undefined, page, limit: 12, sortBy: SORTS[sortIdx].sortBy, sortOrder: SORTS[sortIdx].sortOrder,
+  };
+  const products = useAsync(() => listProducts(query), [sp.toString()]);
 
-  useEffect(() => {
-    listBrands().then(setBrands).catch(() => setBrands([]));
-    listProducts({ limit: 100 })
-      .then((res) => setCategorySample(res.data))
-      .catch(() => setCategorySample([]));
-  }, []);
+  const patch = (changes: Record<string, string | undefined>, resetPage = true) => {
+    const next = new URLSearchParams(sp);
+    Object.entries(changes).forEach(([k, v]) => (v ? next.set(k, v) : next.delete(k)));
+    if (resetPage) next.delete('page');
+    setSp(next);
+  };
+  const clearAll = () => { setSp(new URLSearchParams()); setFilters(false); };
+  const active = ['search', 'category', 'brand', 'min', 'max', 'featured'].filter((k) => get(k));
+  const catName = (id: string) => cats.data?.find((c) => c._id === id)?.name ?? 'Category';
+  const brandName = (id: string) => brands.data?.find((b) => b._id === id)?.name ?? 'Brand';
 
-  useEffect(() => {
-    setLoading(true);
-    setError('');
-    listProducts(query)
-      .then((res) => {
-        setProducts(res.data);
-        setTotalPages(res.meta?.totalPages ?? 1);
-      })
-      .catch((err) => setError(extractErrorMessage(err, 'Could not load products.')))
-      .finally(() => setLoading(false));
-  }, [query]);
-
-  const categories = useMemo(() => {
-    const byId = new Map<string, string>();
-    categorySample.forEach((p) => {
-      const info = categoryInfo(p.category);
-      if (info) byId.set(info.id, info.name);
-    });
-    return Array.from(byId, ([id, name]) => ({ id, name }));
-  }, [categorySample]);
+  const panel = (
+    <div className="space-y-7">
+      <div>
+        <h3 className="label">Category</h3>
+        <div className="mt-2 flex flex-col gap-0.5">
+          <button onClick={() => patch({ category: undefined })} className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition ${!get('category') ? 'bg-brand-50 text-brand-700' : 'hover:bg-brand-50/60'}`}>All categories</button>
+          {(cats.data ?? []).map((c) => (
+            <button key={c._id} onClick={() => patch({ category: c._id })} className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition ${get('category') === c._id ? 'bg-brand-50 text-brand-700' : 'hover:bg-brand-50/60'}`}>{c.name}</button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <h3 className="label">Brand</h3>
+        <select className="field" value={get('brand')} onChange={(e) => patch({ brand: e.target.value || undefined })} aria-label="Brand">
+          <option value="">All brands</option>
+          {(brands.data ?? []).map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <h3 className="label">Price (₦)</h3>
+        <div className="flex items-center gap-2">
+          <input className="field" inputMode="numeric" placeholder="Min" value={min} onChange={(e) => setMin(e.target.value.replace(/\D/g, ''))} aria-label="Minimum price" />
+          <span className="text-mute">–</span>
+          <input className="field" inputMode="numeric" placeholder="Max" value={max} onChange={(e) => setMax(e.target.value.replace(/\D/g, ''))} aria-label="Maximum price" />
+        </div>
+        <button className="btn-ghost btn-sm mt-2 w-full" onClick={() => { patch({ min: min || undefined, max: max || undefined }); setFilters(false); }}>Apply price</button>
+      </div>
+      <label className="flex cursor-pointer items-center gap-3 text-sm font-medium">
+        <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={get('featured') === 'true'} onChange={(e) => patch({ featured: e.target.checked ? 'true' : undefined })} /> Featured only
+      </label>
+    </div>
+  );
 
   return (
-    <div>
-      <div className="bg-steel">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-          <h1 className="text-white text-3xl sm:text-4xl font-display font-800">Shop</h1>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 grid md:grid-cols-[220px_1fr] gap-8">
-        <aside className="space-y-6 h-fit">
-          <div>
-            <p className="label-eyebrow mb-3">Category</p>
-            <div className="space-y-2">
-              <FilterRadio
-                checked={!query.category}
-                label="All Categories"
-                onChange={() => setQuery((q) => ({ ...q, category: undefined, page: 1 }))}
-              />
-              {categories.map((cat) => (
-                <FilterRadio
-                  key={cat.id}
-                  checked={query.category === cat.id}
-                  label={cat.name}
-                  onChange={() => setQuery((q) => ({ ...q, category: cat.id, page: 1 }))}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="label-eyebrow mb-3">Brand</p>
-            <div className="space-y-2">
-              <FilterRadio
-                checked={!query.brand}
-                label="All Brands"
-                onChange={() => setQuery((q) => ({ ...q, brand: undefined, page: 1 }))}
-              />
-              {brands.map((b) => (
-                <FilterRadio
-                  key={b._id}
-                  checked={query.brand === b._id}
-                  label={b.name}
-                  onChange={() => setQuery((q) => ({ ...q, brand: b._id, page: 1 }))}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="label-eyebrow mb-3">Sort</p>
-            <select
-              className="input-field"
-              value={`${query.sortBy}:${query.sortOrder}`}
-              onChange={(e) => {
-                const [sortBy, sortOrder] = e.target.value.split(':') as [string, 'asc' | 'desc'];
-                setQuery((q) => ({ ...q, sortBy, sortOrder, page: 1 }));
-              }}
-            >
-              <option value="createdAt:desc">Newest</option>
-              <option value="price:asc">Price: low to high</option>
-              <option value="price:desc">Price: high to low</option>
-              <option value="name:asc">Name: A&ndash;Z</option>
-            </select>
-          </div>
-        </aside>
-
+    <div className="container-x py-8 sm:py-10">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          {error && <p className="text-warnred text-sm mb-4">{error}</p>}
-          {loading ? (
-            <p className="label-eyebrow">Loading products…</p>
-          ) : products.length === 0 ? (
-            <div className="ticket p-10 text-center">
-              <p className="label-eyebrow">No products match these filters.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-              {products.map((p) => (
-                <ProductCard key={p._id} product={p} />
-              ))}
-            </div>
-          )}
+          <p className="eyebrow mb-1">Harlim ShopAll</p>
+          <h1 className="font-display text-3xl font-extrabold sm:text-4xl">{get('search') ? `Results for “${get('search')}”` : 'Shop everything'}</h1>
+          {products.data && <p className="mt-1 text-sm text-mute">{products.data.meta.total} product{products.data.meta.total === 1 ? '' : 's'}</p>}
+        </div>
+        <div className="flex w-full gap-2 sm:w-auto">
+          <form className="relative flex-1 sm:w-64" onSubmit={(e) => { e.preventDefault(); patch({ search: search.trim() || undefined }); }} role="search">
+            <LuSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mute" />
+            <input className="field pl-10!" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search products" />
+          </form>
+          <select className="field w-auto" aria-label="Sort" value={sortIdx} onChange={(e) => patch({ sort: `${SORTS[+e.target.value].sortBy}:${SORTS[+e.target.value].sortOrder}` })}>
+            {SORTS.map((s, i) => <option key={s.label} value={i}>{s.label}</option>)}
+          </select>
+          <button className="btn-ghost lg:hidden" onClick={() => setFilters(true)} aria-label="Filters"><LuSlidersHorizontal /></button>
+        </div>
+      </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-4 mt-10">
-              <button
-                className="btn-secondary !px-4 !py-2"
-                disabled={(query.page ?? 1) <= 1}
-                onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 1) - 1 }))}
-              >
-                Prev
-              </button>
-              <span className="text-sm font-medium">
-                {query.page} / {totalPages}
-              </span>
-              <button
-                className="btn-secondary !px-4 !py-2"
-                disabled={(query.page ?? 1) >= totalPages}
-                onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 1) + 1 }))}
-              >
-                Next
-              </button>
-            </div>
+      {active.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          {get('category') && <Chip onClear={() => patch({ category: undefined })}>{catName(get('category'))}</Chip>}
+          {get('brand') && <Chip onClear={() => patch({ brand: undefined })}>{brandName(get('brand'))}</Chip>}
+          {get('featured') && <Chip onClear={() => patch({ featured: undefined })}>Featured</Chip>}
+          {(get('min') || get('max')) && <Chip onClear={() => patch({ min: undefined, max: undefined })}>₦{get('min') || '0'} – {get('max') ? `₦${get('max')}` : 'any'}</Chip>}
+          {get('search') && <Chip onClear={() => { patch({ search: undefined }); }}>“{get('search')}”</Chip>}
+          <button onClick={clearAll} className="text-xs font-semibold text-brand-600 hover:underline">Clear all</button>
+        </div>
+      )}
+
+      <div className="grid gap-8 lg:grid-cols-[250px_1fr]">
+        <aside className="card-pad hidden h-fit lg:sticky lg:top-24 lg:block">{panel}</aside>
+        <div>
+          {products.loading ? <ProductGridSkeleton n={8} /> : products.error ? <ErrorState error={products.error} onRetry={products.reload} /> : products.data!.data.length === 0 ? (
+            <EmptyState icon={<LuSearch />} title="Nothing matched" text="Try a different search or remove some filters." action={<button className="btn-primary" onClick={clearAll}>Clear filters</button>} />
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-3">{products.data!.data.map((p) => <ProductCard key={p._id} product={p} />)}</div>
+              <Pager page={products.data!.meta.page} pages={products.data!.meta.totalPages} onChange={(n) => { patch({ page: n > 1 ? String(n) : undefined }, false); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+            </>
           )}
         </div>
       </div>
+
+      <Modal open={filters} onClose={() => setFilters(false)} title="Filters">{panel}</Modal>
     </div>
   );
 }
 
-function FilterRadio({ checked, label, onChange }: { checked: boolean; label: string; onChange: () => void }) {
-  return (
-    <label className="flex items-center gap-2 text-sm cursor-pointer">
-      <input type="radio" checked={checked} onChange={onChange} className="accent-rust" />
-      <span className={checked ? 'text-rust font-medium' : 'text-ink'}>{label}</span>
-    </label>
-  );
+function Chip({ children, onClear }: { children: React.ReactNode; onClear: () => void }) {
+  return <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-1 pl-3 pr-1.5 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">{children}<button onClick={onClear} aria-label="Remove filter" className="grid h-5 w-5 place-items-center rounded-full hover:bg-brand-100"><LuX /></button></span>;
 }

@@ -214,7 +214,7 @@ export class AuthService {
       await this.notificationsService.notifyUser(
         savedUser._id,
         NotificationType.USER_SIGNUP,
-        'Welcome to Duka',
+        'Welcome to Harlim ShopAll',
         `Welcome, ${savedUser.firstname}! Verify your email to get started.`,
       );
 

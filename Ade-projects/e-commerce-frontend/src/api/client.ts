@@ -1,87 +1,128 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { demoRequest, DEMO } from '../demo/server';
+import { HttpError } from './http-error';
 
-// Base URL of the NestJS backend. Set VITE_API_URL in your .env file.
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:4000';
 
-const ACCESS_TOKEN_KEY = 'manifest_access_token';
-const REFRESH_TOKEN_KEY = 'manifest_refresh_token';
+const ACCESS = 'hsa_access_token';
+const REFRESH = 'hsa_refresh_token';
 
-export const tokenStore = {
-  getAccess: () => localStorage.getItem(ACCESS_TOKEN_KEY),
-  getRefresh: () => localStorage.getItem(REFRESH_TOKEN_KEY),
-  set: (access: string, refresh?: string) => {
-    localStorage.setItem(ACCESS_TOKEN_KEY, access);
-    if (refresh) localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
-  },
-  clear: () => {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-  },
+const store = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
+  del: (k: string) => { try { localStorage.removeItem(k); } catch { /* storage blocked */ } },
 };
 
-export const api = axios.create({
-  baseURL: API_URL,
-});
+export const tokenStore = {
+  getAccess: () => store.get(ACCESS),
+  getRefresh: () => store.get(REFRESH),
+  set: (access: string, refresh?: string) => {
+    store.set(ACCESS, access);
+    if (refresh) store.set(REFRESH, refresh);
+  },
+  clear: () => { store.del(ACCESS); store.del(REFRESH); },
+};
 
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = tokenStore.getAccess();
-  if (token) {
-    config.headers = config.headers ?? {};
-    config.headers.Authorization = `Bearer ${token}`;
+export { HttpError };
+
+export interface RequestOptions {
+  params?: object;
+  body?: unknown;
+  auth?: boolean;
+  as?: 'json' | 'text';
+}
+
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+function queryString(params?: object): string {
+  if (!params) return '';
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
   }
-  return config;
-});
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
 
-// Queue of requests waiting on a token refresh so we don't fire /auth/refresh
-// once per failed request.
-let refreshPromise: Promise<string | null> | null = null;
+async function send<T>(method: Method, path: string, opts: RequestOptions, token: string | null): Promise<T> {
+  if (DEMO) return demoRequest<T>(method, path, opts, token);
 
-async function performRefresh(): Promise<string | null> {
+  const headers: Record<string, string> = {};
+  if (token && opts.auth !== false) headers.Authorization = `Bearer ${token}`;
+  let body: BodyInit | undefined;
+  if (opts.body instanceof FormData) body = opts.body;
+  else if (opts.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(opts.body);
+  }
+
+  let res: Response;
+  try {
+    // credentials: include keeps the short-lived password-reset cookie the API sets on /auth.
+    res = await fetch(`${API_URL}${path}${queryString(opts.params)}`, { method, headers, body, credentials: 'include' });
+  } catch {
+    throw new HttpError(0, null, 'Cannot reach the server. Check your connection and try again.');
+  }
+
+  const raw = await res.text();
+  let data: unknown = raw;
+  if (opts.as !== 'text') {
+    try { data = raw ? JSON.parse(raw) : null; } catch { data = raw; }
+  }
+  if (!res.ok) {
+    const m = (data as { message?: string | string[] } | null)?.message;
+    throw new HttpError(res.status, data, Array.isArray(m) ? m.join(' ') : m || res.statusText);
+  }
+  return data as T;
+}
+
+let refreshing: Promise<string | null> | null = null;
+
+async function refreshTokens(): Promise<string | null> {
   const refreshToken = tokenStore.getRefresh();
   if (!refreshToken) return null;
   try {
-    const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
-    const accessToken = data.accessToken ?? data.access_token;
-    if (accessToken) {
-      tokenStore.set(accessToken, data.refreshToken ?? data.refresh_token);
-      return accessToken;
-    }
-    return null;
+    const data = await send<{ accessToken: string; refreshToken: string }>('POST', '/auth/refresh', { body: { refreshToken }, auth: false }, null);
+    tokenStore.set(data.accessToken, data.refreshToken);
+    return data.accessToken;
   } catch {
     return null;
   }
 }
 
-api.interceptors.response.use(
-  (res) => res,
-  async (error: AxiosError) => {
-    const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
-
-    if (error.response?.status === 401 && original && !original._retry) {
-      original._retry = true;
-      if (!refreshPromise) {
-        refreshPromise = performRefresh().finally(() => {
-          refreshPromise = null;
-        });
-      }
-      const newToken = await refreshPromise;
-      if (newToken) {
-        original.headers = original.headers ?? {};
-        original.headers.Authorization = `Bearer ${newToken}`;
-        return api(original);
-      }
+async function request<T>(method: Method, path: string, opts: RequestOptions = {}): Promise<T> {
+  try {
+    return await send<T>(method, path, opts, tokenStore.getAccess());
+  } catch (error) {
+    const authRoute = path.startsWith('/auth/') && !path.startsWith('/auth/me');
+    if (!(error instanceof HttpError) || error.status !== 401 || authRoute || opts.auth === false || !tokenStore.getRefresh()) throw error;
+    // Refresh tokens rotate, so only one refresh may run at a time.
+    refreshing ??= refreshTokens().finally(() => { refreshing = null; });
+    const token = await refreshing;
+    if (!token) {
       tokenStore.clear();
+      window.dispatchEvent(new Event('hsa:signed-out'));
+      throw error;
     }
-    return Promise.reject(error);
+    return send<T>(method, path, opts, token);
   }
-);
+}
 
-// Normalizes NestJS's HttpExceptionFilter error shape into a readable string.
-export function extractErrorMessage(error: unknown, fallback = 'Something went wrong.'): string {
-  if (axios.isAxiosError(error)) {
-    const data = error.response?.data as { message?: string | string[] } | undefined;
-    if (Array.isArray(data?.message)) return data!.message!.join(' ');
-    if (typeof data?.message === 'string') return data.message;
+export const api = {
+  get: <T>(path: string, params?: object, as?: 'json' | 'text') => request<T>('GET', path, { params, as }),
+  post: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>('POST', path, { ...opts, body }),
+  put: <T>(path: string, body?: unknown) => request<T>('PUT', path, { body }),
+  patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, { body }),
+  delete: <T>(path: string, body?: unknown) => request<T>('DELETE', path, { body }),
+};
+
+export function errorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (error instanceof HttpError) {
+    if (error.status === 0) return error.message;
+    if (error.status === 429) return 'Too many attempts. Please wait a minute and try again.';
+    if (error.status === 403 && !error.message) return 'You do not have permission to do that.';
+    return error.message || fallback;
   }
   return fallback;
 }
+
+export const statusOf = (error: unknown): number | undefined => (error instanceof HttpError ? error.status : undefined);

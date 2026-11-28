@@ -1,74 +1,56 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
-import type { User } from '../types';
-import { tokenStore } from '../api/client';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as authApi from '../api/auth';
+import { tokenStore } from '../api/client';
+import type { User } from '../types';
 
-interface AuthContextValue {
+interface AuthState {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (payload: authApi.SignupPayload) => Promise<{ message: string }>;
-  logout: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<authApi.TwoFactorChallenge | User>;
+  signInTwoFactor: (email: string, challengeToken: string, code: string) => Promise<User>;
+  signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
-  loginWithTokens: (accessToken: string, refreshToken?: string) => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const Ctx = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refreshUser = useCallback(async () => {
-    if (!tokenStore.getAccess()) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
-    try {
-      const me = await authApi.fetchMe();
-      setUser(me);
-    } catch {
-      tokenStore.clear();
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+    if (!tokenStore.getAccess()) { setUser(null); return; }
+    try { setUser(await authApi.fetchMe()); } catch { setUser(null); }
   }, []);
 
+  useEffect(() => { refreshUser().finally(() => setLoading(false)); }, [refreshUser]);
   useEffect(() => {
-    refreshUser();
-  }, [refreshUser]);
+    const out = () => setUser(null);
+    window.addEventListener('hsa:signed-out', out);
+    return () => window.removeEventListener('hsa:signed-out', out);
+  }, []);
 
-  const login = async (email: string, password: string) => {
-    const loggedInUser = await authApi.login({ email, password });
-    setUser(loggedInUser);
-  };
+  const value = useMemo<AuthState>(() => ({
+    user, loading, refreshUser,
+    signIn: async (email, password) => {
+      const r = await authApi.login(email, password);
+      if (authApi.isChallenge(r)) return r;
+      setUser(r.user);
+      return r.user;
+    },
+    signInTwoFactor: async (email, challengeToken, code) => {
+      const r = await authApi.loginWithTwoFactor(email, challengeToken, code);
+      setUser(r.user);
+      return r.user;
+    },
+    signOut: async () => { try { await authApi.logout(); } finally { setUser(null); } },
+  }), [user, loading, refreshUser]);
 
-  const signup = async (payload: authApi.SignupPayload) => {
-    return authApi.signup(payload);
-  };
-
-  const logout = async () => {
-    await authApi.logout();
-    setUser(null);
-  };
-
-  // Used by the Google OAuth callback page once tokens arrive via query params.
-  const loginWithTokens = async (accessToken: string, refreshTokenValue?: string) => {
-    tokenStore.set(accessToken, refreshTokenValue);
-    await refreshUser();
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, refreshUser, loginWithTokens }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+export function useAuth(): AuthState {
+  const c = useContext(Ctx);
+  if (!c) throw new Error('useAuth must be used inside AuthProvider');
+  return c;
 }
