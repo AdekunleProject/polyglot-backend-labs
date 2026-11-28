@@ -13,6 +13,7 @@ let db: Db | null = null;
 let resetEmail: string | null = null;
 
 function normalise(d: Db): Db {
+  d.products.forEach((p: Rec) => { if (Array.isArray(p.images) && p.images.some((u: unknown) => typeof u === 'string' && u.startsWith('blob:'))) p.images = [productArt(String(p.name), 'cart')]; });
   d.orders.forEach((o) => { if (o.status === 'delivered' && !o.deliveredAt) o.deliveredAt = o.updatedAt ?? o.createdAt; });
   return d;
 }
@@ -242,9 +243,24 @@ on('GET', '/products', (c) => {
   return { data: p.slice.map(withTaxonomy), meta: { total: p.total, page: p.page, limit: p.limit, totalPages: Math.max(1, Math.ceil(p.total / p.limit)) } };
 });
 on('GET', '/products/:id', (c) => { const p = productById(c.params[0]); return p ? withTaxonomy(p) : fail(404, 'Product not found'); });
+const dataUrls = new WeakMap<File, string>();
+const fileUrl = (f: File): string => dataUrls.get(f) ?? '';
+async function toDataUrl(file: File): Promise<string> {
+  const raw = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsDataURL(file); });
+  if (!file.type.startsWith('image/')) return raw;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = raw; });
+    const scale = Math.min(1, 900 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+    c.getContext('2d')?.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.8);
+  } catch { return raw; }
+}
+
 const imagesFromForm = (form: FormData | null, seed: string, kind = 'cart'): string[] => {
   const files = form ? form.getAll('images').filter((f): f is File => f instanceof File && f.size > 0) : [];
-  return files.length ? files.map((f) => URL.createObjectURL(f)) : [productArt(seed, kind)];
+  return files.length ? files.map((f) => fileUrl(f)) : [productArt(seed, kind)];
 };
 on('POST', '/products', (c) => {
   const actor = guard(c, 'manager');
@@ -481,7 +497,7 @@ on('POST', '/payments/bank-transfer/confirm', (c) => {
   const file = f.get('receipt');
   const url = String(f.get('receiptUrl') ?? '');
   if (!url && !(file instanceof File)) return fail(400, 'Add a receipt link or upload your receipt');
-  pay.receiptUrl = url || (file instanceof File ? URL.createObjectURL(file) : '');
+  pay.receiptUrl = url || (file instanceof File ? fileUrl(file) : '');
   pay.status = 'AWAITING_CONFIRMATION';
   staffIds('admin', 'superadmin').forEach((id) => notify(id, 'TRANSFER_SUBMITTED', 'Bank transfer submitted', `${u.firstname} submitted a transfer receipt.`, '/admin/payments'));
   save();
@@ -542,7 +558,7 @@ on('POST', '/refunds', (c) => {
     if (!['pending', 'processing', 'shipped'].includes(o.status)) return fail(400, 'Only an order that has not arrived can be cancelled for a refund');
     resolution = 'REFUND';
   }
-  const r: Rec = { id: newId('rf'), order: o._id, payment: pay._id, user: u.id, type, resolution, reason, evidence: files.map((x) => URL.createObjectURL(x)), evidenceCount: files.length, amount: type === 'CANCELLATION' ? Math.round(o.total * 0.65) : o.total, status: 'SUBMITTED', verificationNote: null, decisionNote: null, createdAt: nowIso() };
+  const r: Rec = { id: newId('rf'), order: o._id, payment: pay._id, user: u.id, type, resolution, reason, evidence: files.map((x) => fileUrl(x)), evidenceCount: files.length, amount: type === 'CANCELLATION' ? Math.round(o.total * 0.65) : o.total, status: 'SUBMITTED', verificationNote: null, decisionNote: null, createdAt: nowIso() };
   d.refunds.unshift(r);
   staffIds('manager', 'admin', 'superadmin').forEach((id) => notify(id, 'REFUND_REQUESTED', 'Refund requested', `${u.firstname} opened a ${type.toLowerCase()} request.`, '/admin/refunds'));
   save();
@@ -718,6 +734,7 @@ export async function demoRequest<T>(method: string, path: string, opts: Request
   const query: Record<string, any> = Object.fromEntries(Object.entries((opts.params as Record<string, unknown> | undefined) ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, String(v)]));
   const clean = path.split('?')[0];
   const form = opts.body instanceof FormData ? opts.body : null;
+  if (form) for (const [, v] of form.entries()) if (v instanceof File && v.size > 0 && !dataUrls.has(v)) dataUrls.set(v, await toDataUrl(v));
   const body: Rec = form ? Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === 'string')) : ((opts.body as Rec) ?? {});
   const user = opts.auth === false ? null : userFromToken(token);
   for (const [m, re, handler] of routes) {
