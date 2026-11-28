@@ -84,6 +84,33 @@ export class ProductsController {
     return product;
   }
 
+  @Post(':productId/images')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.MANAGER)
+  @UseInterceptors(FilesInterceptor('images', 10, uploadOptions))
+  async addImages(
+    @Param('productId') productId: string,
+    @CurrentUser() actor: CurrentUserInterface,
+    @UploadedFiles() images: Express.Multer.File[],
+  ) {
+    const product = await this.productsService.addImages(productId, images);
+    await this.audit.record(actor.id, 'product.update', { type: 'product', id: productId }, { fields: ['images'], added: images?.length ?? 0 });
+    return product;
+  }
+
+  @Delete(':productId/images')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.MANAGER)
+  async removeImage(
+    @Param('productId') productId: string,
+    @Body('url') url: string,
+    @CurrentUser() actor: CurrentUserInterface,
+  ) {
+    const product = await this.productsService.removeImage(productId, url);
+    await this.audit.record(actor.id, 'product.update', { type: 'product', id: productId }, { fields: ['images'], removed: 1 });
+    return product;
+  }
+
   @Delete(':productId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.MANAGER)

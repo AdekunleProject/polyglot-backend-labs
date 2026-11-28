@@ -19,6 +19,8 @@ export const getProduct = (id: string) => api.get<Product>(`/products/${id}`);
 export const createProduct = (form: FormData) => api.post<Product>('/products', form);
 export const updateProduct = (id: string, body: Partial<Pick<Product, 'name' | 'description' | 'price' | 'sku' | 'featured' | 'isActive'>> & { category?: string; brand?: string }) =>
   api.put<Product>(`/products/${id}`, body);
+export const addProductImages = (id: string, form: FormData) => api.post<Product>(`/products/${id}/images`, form);
+export const removeProductImage = (id: string, url: string) => api.delete<Product>(`/products/${id}/images`, { url });
 export const deleteProduct = (id: string) => api.delete(`/products/${id}`);
 
 export const listVariants = (productId: string) => api.get<Variant[]>(`/variants/product/${productId}`);

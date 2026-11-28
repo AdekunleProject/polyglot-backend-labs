@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { LuBoxes, LuLayers, LuPencil, LuPlus, LuSearch, LuTrash2 } from 'react-icons/lu';
+import { LuBoxes, LuLayers, LuPencil, LuPlus, LuSearch, LuTrash2, LuX } from 'react-icons/lu';
 import * as cat from '../../api/catalog';
 import { errorMessage } from '../../api/client';
 import { ProductImage } from '../../components/ProductCard';
@@ -80,6 +80,7 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
   const [f, setF] = useState({ name: product?.name ?? '', sku: product?.sku ?? '', price: String(product?.price ?? ''), description: product?.description ?? '',
     category: idOf(product?.category as Category | string | undefined), brand: idOf(product?.brand as Brand | string | undefined), featured: !!product?.featured, isActive: product?.isActive ?? true });
   const [files, setFiles] = useState<File[]>([]);
+  const [photos, setPhotos] = useState<string[]>(product?.images ?? []);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const set = (k: keyof typeof f, v: string | boolean) => setF((x) => ({ ...x, [k]: v }));
@@ -92,6 +93,11 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
     try {
       if (product) {
         await cat.updateProduct(product._id, { name: f.name.trim(), sku: f.sku.trim(), price: Number(f.price), description: f.description.trim(), category: f.category, brand: f.brand, featured: f.featured, isActive: f.isActive });
+        if (files.length) {
+          const fd = new FormData();
+          files.forEach((file) => fd.append('images', file));
+          await cat.addProductImages(product._id, fd);
+        }
         toast.success('Product updated');
       } else {
         const fd = new FormData();
@@ -115,8 +121,22 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
           <Field label="Price (₦)" hint="Used when a variant has no price of its own."><input className="field" inputMode="decimal" value={f.price} onChange={(e) => set('price', e.target.value.replace(/[^\d.]/g, ''))} /></Field>
           <Field label="Category"><select className="field" value={f.category} onChange={(e) => set('category', e.target.value)}><option value="">Choose…</option>{categories.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
           <Field label="Brand"><select className="field" value={f.brand} onChange={(e) => set('brand', e.target.value)}><option value="">Choose…</option>{brands.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}</select></Field>
-          {!product && <Field label="Photos" hint="Up to 10 images."><input type="file" accept="image/*" multiple className="field file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-700" onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, 10))} /></Field>}
+          <Field label={product ? 'Add photos' : 'Photos'} hint={`Up to 10 images in total.`}><input type="file" accept="image/*" multiple className="field file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-700" onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, 10))} /></Field>
         </div>
+        {product && photos.length > 0 && (
+          <div>
+            <p className="label">Current photos</p>
+            <div className="flex flex-wrap gap-3">
+              {photos.map((url) => (
+                <div key={url} className="relative h-20 w-20 overflow-hidden rounded-xl border border-line">
+                  <img src={url} alt="" className="h-full w-full object-cover" />
+                  <button type="button" aria-label="Remove photo" className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-white hover:bg-rose-600"
+                    onClick={async () => { try { const updated = await cat.removeProductImage(product._id, url); setPhotos(updated.images ?? photos.filter((x) => x !== url)); } catch (e3) { setErr(errorMessage(e3)); } }}><LuX size={14} /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <Field label="Description"><textarea className="field min-h-24" value={f.description} onChange={(e) => set('description', e.target.value)} /></Field>
         <div className="flex flex-wrap gap-6 text-sm font-medium">
           <label className="flex items-center gap-2"><input type="checkbox" checked={f.featured} onChange={(e) => set('featured', e.target.checked)} className="h-4 w-4 accent-brand-600" /> Featured on the home page</label>

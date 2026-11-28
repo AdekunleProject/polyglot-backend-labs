@@ -287,6 +287,28 @@ on('PUT', '/products/:id', (c) => {
   save();
   return withTaxonomy(p);
 });
+on('POST', '/products/:id/images', (c) => {
+  const actor = guard(c, 'manager');
+  const p = productById(c.params[0]);
+  if (!p) return fail(404, 'Product not found');
+  const added = c.form ? c.form.getAll('images').filter((f): f is File => f instanceof File && f.size > 0).map((f) => fileUrl(f)) : [];
+  if (!added.length) return fail(400, 'Choose at least one image.');
+  const current = (p.images as string[]).filter((u) => !u.startsWith('data:image/svg'));
+  if (current.length + added.length > 10) return fail(400, 'A product can have at most 10 images.');
+  p.images = [...current, ...added];
+  record(actor, 'product.update', { type: 'product', id: p._id }, { fields: ['images'] });
+  save();
+  return withTaxonomy(p);
+});
+on('DELETE', '/products/:id/images', (c) => {
+  const actor = guard(c, 'manager');
+  const p = productById(c.params[0]);
+  if (!p) return fail(404, 'Product not found');
+  p.images = (p.images as string[]).filter((u) => u !== c.body.url);
+  record(actor, 'product.update', { type: 'product', id: p._id }, { fields: ['images'] });
+  save();
+  return withTaxonomy(p);
+});
 on('DELETE', '/products/:id', (c) => {
   const actor = guard(c, 'manager');
   const d = load();

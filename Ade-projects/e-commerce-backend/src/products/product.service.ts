@@ -154,6 +154,39 @@ export class ProductsService {
     return product;
   }
 
+  async addImages(productId: string, images: Express.Multer.File[]) {
+    const product = await this.productModel.findById(productId);
+    if (!product) {
+      throw new NotFoundException('Product not found.');
+    }
+    if (!images?.length) {
+      throw new BadRequestException('Choose at least one image.');
+    }
+    if ((product.images?.length ?? 0) + images.length > 10) {
+      throw new BadRequestException('A product can have at most 10 images.');
+    }
+    for (const image of images) {
+      product.images.push(await this.fileUpload.uploadFile(image, 'products'));
+    }
+    await product.save();
+    return product;
+  }
+
+  async removeImage(productId: string, url: string) {
+    if (!url) {
+      throw new BadRequestException('Image url is required.');
+    }
+    const product = await this.productModel.findByIdAndUpdate(
+      productId,
+      { $pull: { images: url } },
+      { returnDocument: 'after' },
+    );
+    if (!product) {
+      throw new NotFoundException('Product not found.');
+    }
+    return product;
+  }
+
   async remove(productId: string) {
     const product = await this.productModel.findById(productId);
 
