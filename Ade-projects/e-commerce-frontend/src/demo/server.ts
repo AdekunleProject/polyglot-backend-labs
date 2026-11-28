@@ -414,11 +414,14 @@ async function warmSignatures() {
 on('POST', '/products/visual-search', (c) => {
   const sig = c.body.signature as number[] | undefined;
   if (!Array.isArray(sig) || sig.length !== 48 || sig.some((n) => typeof n !== 'number' || !Number.isFinite(n))) return fail(400, 'signature must be 48 numbers between 0 and 1.');
-  return load().products.filter((p) => p.isActive).map((p) => {
+  const out: Rec[] = [];
+  for (const p of load().products) {
+    if (!p.isActive) continue;
     const src = (p.images as string[] | undefined)?.[0] ?? productArt(String(p.name));
     const other = signatures.get(src) ?? [];
-    return other.length ? { ...withTaxonomy(p), similarity: similarityPercent(sig, other) } : null;
-  }).filter((x): x is Rec => !!x).sort((a, b) => b.similarity - a.similarity).slice(0, 12);
+    if (other.length) out.push({ ...withTaxonomy(p), similarity: similarityPercent(sig, other) });
+  }
+  return out.sort((a, b) => b.similarity - a.similarity).slice(0, 12);
 });
 on('DELETE', '/products/:id/images', (c) => {
   const actor = guard(c, 'manager');
