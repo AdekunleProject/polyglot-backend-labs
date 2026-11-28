@@ -4,10 +4,10 @@ import { Countdown } from '../../components/Countdown';
 import { signatureFromSource } from '../../lib/visual';
 import * as cat from '../../api/catalog';
 import { errorMessage } from '../../api/client';
-import { ProductImage } from '../../components/ProductCard';
+import { PriceTag, ProductImage } from '../../components/ProductCard';
 import { Alert, EmptyState, ErrorState, Field, Modal, PageLoader, Pager, StatusBadge, useAsync } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
-import { idOf, money, nameOf } from '../../lib/format';
+import { dateShort, dateTime, idOf, money, nameOf, timeLeftText } from '../../lib/format';
 import type { Brand, Category, Product, Variant } from '../../types';
 import { PageHead } from './AdminLayout';
 
@@ -23,7 +23,7 @@ export default function Products() {
   const [removing, setRemoving] = useState<Product | null>(null);
   useEffect(() => { const t = setTimeout(() => { setQ(search.trim()); setPage(1); }, 300); return () => clearTimeout(t); }, [search]);
 
-  const list = useAsync(() => cat.listProducts({ search: q || undefined, page, limit: LIMIT, sortBy: 'createdAt', sortOrder: 'desc' }), [q, page]);
+  const list = useAsync(() => cat.listStaffProducts({ search: q || undefined, page, limit: LIMIT, sortBy: 'createdAt', sortOrder: 'desc' }), [q, page]);
   const taxo = useAsync(async () => ({ brands: await cat.listBrands(), categories: await cat.listCategories() }), []);
 
   const confirmDelete = async () => {
@@ -44,15 +44,17 @@ export default function Products() {
         <EmptyState icon={<LuBoxes />} title="No products found" text="Try another search, or add your first product." />
       ) : (
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto"><table className="w-full min-w-[760px]">
-            <thead className="border-b border-line bg-paper"><tr><th className="table-th">Product</th><th className="table-th">SKU</th><th className="table-th">Category</th><th className="table-th">Price</th><th className="table-th">Status</th><th className="table-th text-right">Actions</th></tr></thead>
+          <div className="overflow-x-auto"><table className="w-full min-w-[1080px]">
+            <thead className="border-b border-line bg-paper"><tr><th className="table-th">Product</th><th className="table-th">SKU</th><th className="table-th">Category</th><th className="table-th">Price</th><th className="table-th">Added by</th><th className="table-th">Deal ends</th><th className="table-th">Status</th><th className="table-th text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-line">
               {list.data.data.map((p) => (
                 <tr key={p._id} className="hover:bg-paper/60">
                   <td className="table-td"><div className="flex items-center gap-3"><ProductImage product={p} className="h-12 w-12 rounded-xl" /><div className="min-w-0"><p className="truncate font-semibold">{p.name}</p><p className="text-xs text-mute">{nameOf(p.brand)}</p></div></div></td>
                   <td className="table-td font-mono text-xs text-mute">{p.sku}</td>
                   <td className="table-td">{nameOf(p.category) || '—'}</td>
-                  <td className="table-td font-semibold">{money(p.price)}</td>
+                  <td className="table-td font-semibold"><PriceTag price={p.price} compare={p.comparePrice} /></td>
+                  <td className="table-td text-sm">{typeof p.createdBy === 'object' && p.createdBy ? <><p className="font-semibold">{p.createdBy.firstname} {p.createdBy.lastname}</p><p className="text-xs text-mute">{dateShort(p.createdAt)}</p></> : <span className="text-mute">—</span>}</td>
+                  <td className="table-td text-sm">{p.dealEndsAt ? <><p className="font-semibold">{dateTime(p.dealEndsAt)}</p><p className={`text-xs font-semibold ${new Date(p.dealEndsAt).getTime() > Date.now() ? 'text-flame-500' : 'text-mute'}`}>{timeLeftText(p.dealEndsAt)}</p></> : <span className="text-mute">No deal</span>}</td>
                   <td className="table-td"><div className="flex gap-1.5"><StatusBadge tone={p.isActive ? 'green' : 'gray'}>{p.isActive ? 'Active' : 'Hidden'}</StatusBadge>{p.featured && <StatusBadge tone="violet">Featured</StatusBadge>}</div></td>
                   <td className="table-td"><div className="flex justify-end gap-1.5">
                     <button className="btn-ghost btn-sm" onClick={() => setManaging(p)}><LuLayers /> Variants</button>
@@ -80,7 +82,7 @@ export default function Products() {
 function ProductForm({ product, brands, categories, onClose, onSaved }: { product: Product | null; brands: Brand[]; categories: Category[]; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [f, setF] = useState({ name: product?.name ?? '', sku: product?.sku ?? '', price: String(product?.price ?? ''), description: product?.description ?? '',
-    category: idOf(product?.category as Category | string | undefined), brand: idOf(product?.brand as Brand | string | undefined), featured: !!product?.featured, isActive: product?.isActive ?? true, dealDays: '', dealHours: '' });
+    category: idOf(product?.category as Category | string | undefined), brand: idOf(product?.brand as Brand | string | undefined), featured: !!product?.featured, isActive: product?.isActive ?? true, dealDays: '', dealHours: '', comparePrice: product?.comparePrice ? String(product.comparePrice) : '' });
   const [files, setFiles] = useState<File[]>([]);
   const [photos, setPhotos] = useState<string[]>(product?.images ?? []);
   const [busy, setBusy] = useState(false);
@@ -91,6 +93,7 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
     e.preventDefault();
     setErr('');
     if (!f.name.trim() || !f.sku.trim() || !(Number(f.price) > 0) || !f.category || !f.brand || !f.description.trim()) { setErr('Name, SKU, price, category, brand and description are all required.'); return; }
+    if (f.comparePrice.trim() && !(Number(f.comparePrice) > Number(f.price))) { setErr('Original price must be higher than the selling price, or leave it empty.'); return; }
     setBusy(true);
     const hasDeal = f.dealDays.trim() !== '' || f.dealHours.trim() !== '';
     const days = Math.max(0, Math.floor(Number(f.dealDays) || 0));
@@ -99,7 +102,7 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
     const dealPayload = hasDeal ? { dealDays: days, dealHours: hours } : {};
     try {
       if (product) {
-        await cat.updateProduct(product._id, { name: f.name.trim(), sku: f.sku.trim(), price: Number(f.price), description: f.description.trim(), category: f.category, brand: f.brand, featured: f.featured, isActive: f.isActive, ...dealPayload });
+        await cat.updateProduct(product._id, { name: f.name.trim(), sku: f.sku.trim(), price: Number(f.price), description: f.description.trim(), category: f.category, brand: f.brand, featured: f.featured, isActive: f.isActive, comparePrice: Number(f.comparePrice) || 0, ...dealPayload });
         if (files.length) {
           const fd = new FormData();
           files.forEach((file) => fd.append('images', file));
@@ -111,6 +114,7 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
         const fd = new FormData();
         fd.append('name', f.name.trim()); fd.append('sku', f.sku.trim()); fd.append('price', f.price); fd.append('description', f.description.trim());
         fd.append('category', f.category); fd.append('brand', f.brand); fd.append('featured', String(f.featured));
+        if (f.comparePrice.trim()) fd.append('comparePrice', f.comparePrice);
         if (hasDeal) { fd.append('dealDays', String(days)); fd.append('dealHours', String(hours)); }
         files.forEach((file) => fd.append('images', file));
         if (files.length) { try { fd.append('visualSignature', JSON.stringify(await signatureFromSource(files[0]))); } catch { /* the product is still created without a visual signature */ } }
@@ -128,7 +132,8 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name"><input className="field" value={f.name} onChange={(e) => set('name', e.target.value)} /></Field>
           <Field label="SKU"><input className="field font-mono" value={f.sku} onChange={(e) => set('sku', e.target.value)} placeholder="HSA-1042" /></Field>
-          <Field label="Price (₦)" hint="Used when a variant has no price of its own."><input className="field" inputMode="decimal" value={f.price} onChange={(e) => set('price', e.target.value.replace(/[^\d.]/g, ''))} /></Field>
+          <Field label="Selling price (₦)" hint="What the customer pays. Used when a variant has no price of its own."><input className="field" inputMode="decimal" value={f.price} onChange={(e) => set('price', e.target.value.replace(/[^\d.]/g, ''))} /></Field>
+          <Field label="Original price (₦)" hint="Optional. Shown crossed out beside the selling price, so it must be higher. Use a price the product was really sold at."><input className="field" inputMode="decimal" placeholder="e.g. 45000" value={f.comparePrice} onChange={(e) => set('comparePrice', e.target.value.replace(/[^\d.]/g, ''))} /></Field>
           <Field label="Category"><select className="field" value={f.category} onChange={(e) => set('category', e.target.value)}><option value="">Choose…</option>{categories.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
           <Field label="Brand"><select className="field" value={f.brand} onChange={(e) => set('brand', e.target.value)}><option value="">Choose…</option>{brands.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}</select></Field>
           <Field label={product ? 'Add photos' : 'Photos'} hint={`Up to 10 images in total.`}><input type="file" accept="image/*" multiple className="field file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-700" onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, 10))} /></Field>

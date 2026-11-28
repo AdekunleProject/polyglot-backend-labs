@@ -86,6 +86,14 @@ export class Product extends Document {
   @Prop({ default: 0, min: 0 })
   ratingPositive!: number;
 
+  // The price shown crossed out ("was" price). Zero means none. Must be higher than price.
+  @Prop({ default: 0, min: 0 })
+  comparePrice!: number;
+
+  // The manager who added the product. Only returned to staff.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', select: false })
+  createdBy?: Types.ObjectId;
+
   // When the manager's countdown ends. Null or past means no active countdown.
   @Prop({ type: Date, default: null })
   dealEndsAt?: Date | null;

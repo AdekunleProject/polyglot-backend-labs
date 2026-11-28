@@ -40,6 +40,13 @@ export class ProductsController {
     return this.productsService.findAll(query);
   }
 
+  @Get('staff/list')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.MANAGER, Role.ADMIN, Role.SUPERADMIN)
+  staffList(@Query() query: QueryProductDto) {
+    return this.productsService.findAll(query, true);
+  }
+
   // CRITICAL BUG FIX: this route was declared as @Get(':id') but the
   // handler read @Param('productId') — since those names didn't match,
   // Nest's @Param() extraction always returned undefined, so
@@ -67,7 +74,7 @@ export class ProductsController {
     @UploadedFiles()
     images?: Express.Multer.File[],
   ) {
-    const product = await this.productsService.create(dto, images);
+    const product = await this.productsService.create(dto, images, actor.id);
     await this.audit.record(actor.id, 'product.create', { type: 'product', id: idOf(product) }, pick(product, ['name', 'sku']));
     return product;
   }

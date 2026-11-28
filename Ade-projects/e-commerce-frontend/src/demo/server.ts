@@ -237,9 +237,13 @@ on('POST', '/users/create-admin-profile', (c) => {
 });
 
 /* ---------------------------------- catalog --------------------------------- */
-on('GET', '/products', (c) => {
+const staffView = (p: Rec): Rec => {
+  const u = load().users.find((x) => x.id === p.createdBy);
+  return { ...withTaxonomy(p), createdBy: u ? { _id: u.id, firstname: u.firstname, lastname: u.lastname } : null };
+};
+const listProducts = (c: { query: Rec }, staff: boolean) => {
   const q = c.query;
-  let list = load().products.filter((p) => p.isActive);
+  let list = load().products.filter((p) => staff || p.isActive);
   if (q.search) { const s = String(q.search).toLowerCase(); list = list.filter((p) => `${p.name} ${p.description} ${p.sku}`.toLowerCase().includes(s)); }
   if (q.category) list = list.filter((p) => p.category === q.category);
   if (q.brand) list = list.filter((p) => p.brand === q.brand);
@@ -250,8 +254,10 @@ on('GET', '/products', (c) => {
   const dir = q.sortOrder === 'asc' ? 1 : -1;
   list = [...list].sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
   const p = pagination(list, q);
-  return { data: p.slice.map(withTaxonomy), meta: { total: p.total, page: p.page, limit: p.limit, totalPages: Math.max(1, Math.ceil(p.total / p.limit)) } };
-});
+  return { data: p.slice.map(staff ? staffView : withTaxonomy), meta: { total: p.total, page: p.page, limit: p.limit, totalPages: Math.max(1, Math.ceil(p.total / p.limit)) } };
+};
+on('GET', '/products', (c) => listProducts(c, false));
+on('GET', '/products/staff/list', (c) => { guard(c, 'manager', 'admin', 'superadmin'); return listProducts(c, true); });
 on('GET', '/products/:id', (c) => { const p = productById(c.params[0]); return p ? withTaxonomy(p) : fail(404, 'Product not found'); });
 const dataUrls = new WeakMap<File, string>();
 const fileUrl = (f: File): string => dataUrls.get(f) ?? '';
@@ -279,9 +285,11 @@ on('POST', '/products', (c) => {
   const price = Number(f.get('price'));
   if (!name) return fail(400, 'name should not be empty');
   if (!(price > 0)) return fail(400, 'price must be a positive number');
+  const compare = Number(f.get('comparePrice') ?? 0) || 0;
+  if (compare && compare <= price) return fail(400, 'Original price must be higher than the selling price.');
   const sku = String(f.get('sku') ?? `HSA-${Date.now().toString().slice(-6)}`);
   if (load().products.some((p) => p.sku === sku)) return fail(409, 'A product with this SKU already exists');
-  const p: Rec = { _id: newId(name), name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), sku, description: String(f.get('description') ?? ''), price, discountPrice: 0, images: imagesFromForm(f, name), category: String(f.get('category') ?? ''), brand: String(f.get('brand') ?? ''), featured: f.get('featured') === 'true', isActive: true, createdAt: nowIso() };
+  const p: Rec = { _id: newId(name), createdBy: actor.id, comparePrice: compare, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), sku, description: String(f.get('description') ?? ''), price, discountPrice: 0, images: imagesFromForm(f, name), category: String(f.get('category') ?? ''), brand: String(f.get('brand') ?? ''), featured: f.get('featured') === 'true', isActive: true, createdAt: nowIso() };
   const deal = f.get('dealDays') !== null || f.get('dealHours') !== null ? dealEnd(f.get('dealDays') ?? undefined, f.get('dealHours') ?? undefined) : undefined;
   p.dealEndsAt = deal ?? null;
   load().products.unshift(p);
@@ -293,7 +301,10 @@ on('PUT', '/products/:id', (c) => {
   const actor = guard(c, 'manager');
   const p = productById(c.params[0]);
   if (!p) return fail(404, 'Product not found');
-  const fields = ['name', 'description', 'price', 'sku', 'featured', 'isActive', 'category', 'brand'].filter((k) => c.body[k] !== undefined);
+  const nextPrice = c.body.price !== undefined ? Number(c.body.price) : p.price;
+  const nextCompare = c.body.comparePrice !== undefined ? Number(c.body.comparePrice) || 0 : p.comparePrice ?? 0;
+  if (nextCompare && nextCompare <= nextPrice) return fail(400, 'Original price must be higher than the selling price.');
+  const fields = ['name', 'description', 'price', 'comparePrice', 'sku', 'featured', 'isActive', 'category', 'brand'].filter((k) => c.body[k] !== undefined);
   fields.forEach((k) => { p[k] = c.body[k]; });
   const deal = dealEnd(c.body.dealDays, c.body.dealHours);
   if (deal !== undefined) { p.dealEndsAt = deal; fields.push('dealEndsAt'); }

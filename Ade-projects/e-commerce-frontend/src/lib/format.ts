@@ -62,3 +62,19 @@ export function ratingBand(count?: number, positive?: number): 'excellent' | 'go
   if (!count) return null;
   return (positive ?? 0) / count > 0.65 ? 'excellent' : 'good';
 }
+
+/** Whole-number percent saved between the crossed-out price and the selling price. Zero when there is no real saving. */
+export const percentOff = (price?: number, compare?: number) => (compare && price && compare > price ? Math.round(((compare - price) / compare) * 100) : 0);
+
+/** "2 days 5 hours left", "3 hours 10 minutes left" or "Expired". */
+export function timeLeftText(iso?: string | null, now = Date.now()): string {
+  if (!iso) return '';
+  const ms = new Date(iso).getTime() - now;
+  if (ms <= 0) return 'Expired';
+  const mins = Math.floor(ms / 60000);
+  const d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  if (d > 0) return `${plural(d, 'day')} ${plural(h, 'hour')} left`;
+  if (h > 0) return `${plural(h, 'hour')} ${plural(m, 'minute')} left`;
+  return `${plural(Math.max(1, m), 'minute')} left`;
+}

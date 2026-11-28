@@ -45,7 +45,10 @@ export class ProductsService {
     private readonly fileUpload: FileUpload,
   ) {}
 
-  async create(dto: CreateProductDto, images?: Express.Multer.File[]) {
+  async create(dto: CreateProductDto, images?: Express.Multer.File[], createdBy?: string) {
+    if (dto.comparePrice && dto.comparePrice <= dto.price) {
+      throw new BadRequestException('Original price must be higher than the selling price.');
+    }
     const slug = slugify(dto.name, {
       lower: true,
       strict: true,
@@ -71,16 +74,15 @@ export class ProductsService {
       ...rest,
       visualSignature: parseSignature(visualSignature),
       dealEndsAt: dealEnd(dealDays, dealHours) ?? null,
+      createdBy,
       slug,
       sku: dto.sku.toUpperCase(),
       images: uploadedImages,
     });
   }
 
-  async findAll(query: QueryProductDto) {
-    const filter: Record<string, unknown> = {
-      isActive: true,
-    };
+  async findAll(query: QueryProductDto, staff = false) {
+    const filter: Record<string, unknown> = staff ? {} : { isActive: true };
 
     if (query.search) {
       filter.name = {
@@ -116,8 +118,7 @@ export class ProductsService {
     const { skip, limit } = getPagination(query.page, query.limit);
 
     const [products, total] = await Promise.all([
-      this.productModel
-        .find(filter)
+      (staff ? this.productModel.find(filter).select('+createdBy').populate('createdBy', 'firstname lastname') : this.productModel.find(filter))
         .populate('category')
         .populate('brand')
         .skip(skip)
@@ -165,6 +166,14 @@ export class ProductsService {
     });
     if (exists) {
       throw new BadRequestException('Product already exists.');
+    }
+    if (update.price !== undefined || update.comparePrice !== undefined) {
+      const current = await this.productModel.findById(productId).select('price comparePrice');
+      const price = update.price ?? current?.price ?? 0;
+      const compare = update.comparePrice ?? current?.comparePrice ?? 0;
+      if (compare && compare <= price) {
+        throw new BadRequestException('Original price must be higher than the selling price.');
+      }
     }
     const { dealDays, dealHours, ...fields } = update;
     const data: Record<string, unknown> = { ...fields };

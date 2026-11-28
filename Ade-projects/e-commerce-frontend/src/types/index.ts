@@ -37,6 +37,8 @@ export interface Product {
   description?: string;
   price: number;
   discountPrice?: number;
+  comparePrice?: number;
+  createdBy?: { _id: string; firstname: string; lastname: string } | string | null;
   images?: string[];
   brand?: Brand | string;
   category?: Category | string;

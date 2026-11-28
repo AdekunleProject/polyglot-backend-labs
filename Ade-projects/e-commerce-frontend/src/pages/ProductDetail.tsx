@@ -4,7 +4,7 @@ import { LuMinus, LuPlus, LuRotateCcw, LuShieldCheck, LuShoppingBag, LuTruck } f
 import { getProduct, listProducts, listVariants } from '../api/catalog';
 import { errorMessage } from '../api/client';
 import { Breadcrumb, ErrorState, PageLoader, SectionHead, Spinner, useAsync } from '../components/ui';
-import { ProductCard, ProductRail, ProductImage } from '../components/ProductCard';
+import { PriceTag, ProductCard, ProductRail, ProductImage } from '../components/ProductCard';
 import { useAuth } from '../context/AuthContext';
 import { Countdown } from '../components/Countdown';
 import { ShareButton } from '../components/Share';
@@ -96,7 +96,7 @@ export default function ProductDetail() {
           <button type="button" className="mt-3 text-left" onClick={() => document.getElementById('reviews')?.scrollIntoView({ behavior: 'smooth' })} aria-label="Jump to ratings and comments">
             <RatingLine average={p.ratingAverage} count={p.ratingCount} positive={p.ratingPositive} className="text-sm" />
           </button>
-          <p className="mt-4 font-display text-4xl font-extrabold gradient-text">{money(price)}</p>
+          <PriceTag price={price} compare={p.comparePrice} size="lg" className="mt-4" />
           <Countdown endsAt={p.dealEndsAt} variant="block" className="mt-3" />
           <p className="mt-2 text-xs text-mute">SKU {selected?.sku ?? p.sku} · Delivery fee shown at checkout</p>
           <p className="mt-6 leading-relaxed text-ink/75">{p.description}</p>

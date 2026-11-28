@@ -97,7 +97,7 @@ export function buildSeed(): Db {
   const manager = mkUser('Folake', 'Adeyemi', 'manager@demo.shop', 'manager', { gender: 'female', twoFactorEnabled: true });
   const admin = mkUser('Chidi', 'Obi', 'admin@demo.shop', 'admin', { twoFactorEnabled: true });
   const sup = mkUser('Harlim', 'Owner', 'super@demo.shop', 'superadmin', { twoFactorEnabled: true });
-  mkUser('Segun', 'Lawal', 'segun.manager@demo.shop', 'manager', { twoFactorEnabled: false });
+  const manager2 = mkUser('Segun', 'Lawal', 'segun.manager@demo.shop', 'manager', { twoFactorEnabled: false });
 
   const catIds: Record<string, string> = {};
   CATEGORIES.forEach(([name, description]) => { const c = { _id: newId(name), name, description }; catIds[name] = c._id; db.categories.push(c); });
@@ -109,7 +109,7 @@ export function buildSeed(): Db {
     const p: Rec = {
       _id: newId(name), name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
       sku: `HSA-${String(1000 + idx)}`, description: `${blurb} Free delivery on orders over ₦50,000. Covered by Harlim ShopAll buyer protection.`,
-      price, discountPrice: 0, images: [productArt(name, spec.kind), productArt(name + ' alt', spec.kind)],
+      price, discountPrice: 0, comparePrice: idx % 3 === 0 ? Math.round((price * 1.25) / 500) * 500 : 0, createdBy: (idx % 4 === 3 ? manager2 : manager).id, images: [productArt(name, spec.kind), productArt(name + ' alt', spec.kind)],
       category: catIds[cat], brand: brandIds[brand], featured, isActive: true, createdAt: ago((PRODUCTS.length - idx) * 0.9 * D),
     };
     db.products.push(p);

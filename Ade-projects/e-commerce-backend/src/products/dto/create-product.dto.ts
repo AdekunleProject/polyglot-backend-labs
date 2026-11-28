@@ -51,6 +51,11 @@ export class CreateProductDto {
   discountPrice?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  comparePrice?: number;
+
+  @IsOptional()
   @IsString()
   sku!: string;
 

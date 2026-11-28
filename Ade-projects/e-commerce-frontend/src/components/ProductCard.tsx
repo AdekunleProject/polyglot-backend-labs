@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { LuPlus, LuShoppingBag, LuStar } from 'react-icons/lu';
 import { listVariants } from '../api/catalog';
 import { errorMessage } from '../api/client';
-import { money, nameOf } from '../lib/format';
+import { money, nameOf, percentOff } from '../lib/format';
 import { productArt } from '../lib/art';
 import { Countdown } from './Countdown';
 import { RatingLine } from './Reviews';
@@ -52,6 +52,22 @@ export function CartPlusButton({ product, className = '' }: { product: Product; 
   );
 }
 
+/** The selling price, with the original price crossed out and the percent saved when there is one. */
+export function PriceTag({ price, compare, size = 'md', className = '' }: { price: number; compare?: number; size?: 'md' | 'lg'; className?: string }) {
+  const off = percentOff(price, compare);
+  return (
+    <p className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 ${className}`}>
+      <span className={`font-display font-bold leading-none ${size === 'lg' ? 'text-4xl font-extrabold gradient-text' : 'text-lg'}`}>{money(price)}</span>
+      {off > 0 && (
+        <>
+          <s className={`${size === 'lg' ? 'text-lg' : 'text-xs'} text-mute`} aria-label={`Was ${money(compare)}`}>{money(compare)}</s>
+          <span className={`rounded-md bg-emerald-100 px-1.5 py-0.5 font-bold text-emerald-700 ${size === 'lg' ? 'text-sm' : 'text-[11px]'}`}>-{off}%</span>
+        </>
+      )}
+    </p>
+  );
+}
+
 export function ProductCard({ product }: { product: Product }) {
   return (
     <Link to={`/product/${product._id}`} className="group card flex h-full flex-col overflow-hidden transition duration-300 hover:-translate-y-1.5 hover:shadow-lift">
@@ -69,7 +85,7 @@ export function ProductCard({ product }: { product: Product }) {
         <h3 className="mt-1 line-clamp-2 min-h-[2.6rem] font-display text-[15px] font-semibold leading-snug">{product.name}</h3>
         <RatingLine average={product.ratingAverage} count={product.ratingCount} positive={product.ratingPositive} className="mt-1.5" />
         <div className="mt-auto flex items-end justify-between gap-2 pt-3">
-          <p className="font-display text-lg font-bold leading-none">{money(product.price)}</p>
+          <PriceTag price={product.price} compare={product.comparePrice} className="min-w-0" />
           <CartPlusButton product={product} />
         </div>
       </div>
