@@ -44,6 +44,8 @@ export interface Product {
   isActive: boolean;
   ratingAverage?: number;
   ratingCount?: number;
+  ratingPositive?: number;
+  dealEndsAt?: string | null;
   createdAt?: string;
 }
 

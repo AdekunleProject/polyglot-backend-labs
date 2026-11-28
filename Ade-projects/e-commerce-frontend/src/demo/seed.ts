@@ -208,6 +208,8 @@ export function buildSeed(): Db {
   audit(admin, 'user.view', { type: 'user', id: tunde.id }, {}, 1 * D);
   audit(sup, 'report.view', undefined as any, { report: 'staff-activity' }, 5 * H);
   seedReviews(db);
+  const deals: [string, number][] = [['Nova X12 Smartphone', 2 * 24 + 5], ['City Backpack', 9], ['Orbit Runner Sneakers', 26]];
+  for (const [name, hours] of deals) { const p = db.products.find((x) => x.name === name); if (p) p.dealEndsAt = new Date(Date.now() + hours * H).toISOString(); }
   return db;
 }
 
@@ -231,6 +233,7 @@ export function refreshRating(db: Db, productId: string) {
   const p = db.products.find((x) => x._id === productId);
   if (!p) return;
   p.ratingCount = list.length;
+  p.ratingPositive = list.filter((r) => r.rating >= 4).length;
   p.ratingAverage = list.length ? Math.round((list.reduce((t, r) => t + r.rating, 0) / list.length) * 10) / 10 : 0;
 }
 

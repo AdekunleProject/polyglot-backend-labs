@@ -82,6 +82,14 @@ export class Product extends Document {
   @Prop({ default: 0, min: 0 })
   ratingCount!: number;
 
+  // Reviews rated 4 or 5 stars. More than 65% of ratings positive earns the "Excellent" label.
+  @Prop({ default: 0, min: 0 })
+  ratingPositive!: number;
+
+  // When the manager's countdown ends. Null or past means no active countdown.
+  @Prop({ type: Date, default: null })
+  dealEndsAt?: Date | null;
+
   // Coarse colour layout of the first photo, used by visual search.
   @Prop({ type: [Number], default: undefined, select: false })
   visualSignature?: number[];

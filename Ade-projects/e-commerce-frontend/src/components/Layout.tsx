@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LuBell, LuChevronDown, LuLayoutDashboard, LuLogOut, LuMail, LuMapPin, LuMenu, LuPackage, LuPhone, LuRotateCcw, LuSearch, LuShieldCheck, LuShoppingBag, LuTruck, LuUser, LuX } from 'react-icons/lu';
+import { LuHouse, LuStore, LuBell, LuChevronDown, LuLayoutDashboard, LuLogOut, LuMail, LuMapPin, LuMenu, LuPackage, LuPhone, LuRotateCcw, LuSearch, LuShieldCheck, LuShoppingBag, LuTruck, LuUser, LuX } from 'react-icons/lu';
 import { Logo } from './Logo';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
@@ -227,15 +227,52 @@ export function Footer() {
   );
 }
 
+function BottomNav() {
+  const { user } = useAuth();
+  const { count } = useCart();
+  const loc = useLocation();
+  if (/^\/(product|checkout)\b|\/pay$/.test(loc.pathname)) return null;
+  const staff = !!user && isStaff(user.role);
+  const tabs = [
+    { to: '/', label: 'Home', icon: <LuHouse />, end: true },
+    { to: '/shop', label: 'Shop', icon: <LuStore /> },
+    ...(!staff ? [{ to: '/cart', label: 'Cart', icon: <LuShoppingBag />, badge: count }] : []),
+    ...(user?.role === 'customer' ? [{ to: '/orders', label: 'Orders', icon: <LuPackage /> }] : []),
+    staff ? { to: '/admin', label: 'Console', icon: <LuLayoutDashboard /> } : user ? { to: '/account', label: 'Me', icon: <LuUser /> } : { to: '/login', label: 'Sign in', icon: <LuUser /> },
+  ];
+  return (
+    <nav aria-label="Quick links" className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden">
+      <ul className="mx-auto grid max-w-lg" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+        {tabs.map((t) => (
+          <li key={t.to}>
+            <NavLink to={t.to} end={'end' in t ? t.end : false} className={({ isActive }) => `relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold transition ${isActive ? 'text-brand-600' : 'text-mute'}`}>
+              {({ isActive }) => (
+                <>
+                  <span className={`relative grid h-7 w-12 place-items-center rounded-full text-xl transition ${isActive ? 'bg-brand-50' : ''}`}>
+                    {t.icon}
+                    {'badge' in t && (t.badge ?? 0) > 0 && <span className="absolute right-1.5 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-brand-gradient px-1 text-[10px] font-bold text-white">{t.badge}</span>}
+                  </span>
+                  {t.label}
+                </>
+              )}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
 export function StoreLayout() {
   const loc = useLocation();
   useEffect(() => { window.scrollTo({ top: 0 }); }, [loc.pathname]);
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col pb-16 md:pb-0">
       <DemoBanner />
       <Navbar />
       <main className="flex-1"><Outlet /></main>
       <Footer />
+      <BottomNav />
     </div>
   );
 }

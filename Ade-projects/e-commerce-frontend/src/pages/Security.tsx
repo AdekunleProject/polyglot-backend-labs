@@ -8,6 +8,8 @@ import { PasswordInput, PasswordRules, passwordOk } from '../components/AuthShel
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { dateShort, ROLE_LABEL } from '../lib/format';
+import { ShareButton } from '../components/Share';
+import { appUrl } from '../lib/url';
 import type { Profile } from '../types';
 
 export default function Security() {
@@ -21,7 +23,10 @@ export default function Security() {
 
   return (
     <div className="container-x max-w-4xl py-8 sm:py-10">
-      <h1 className="font-display text-3xl font-extrabold sm:text-4xl">Profile & security</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h1 className="font-display text-3xl font-extrabold sm:text-4xl">Profile & security</h1>
+        {p && <ShareButton label="Share my profile" target={{ title: 'Harlim ShopAll', text: `${p.firstname} ${p.lastname} invites you to shop on Harlim ShopAll.`, url: appUrl('/') }} />}
+      </div>
       <p className="mb-6 mt-1 text-mute">{p ? `${ROLE_LABEL[p.role]} · member since ${dateShort(p.createdAt)}` : ''}</p>
       {user?.restriction === 'change-password' && <div className="mb-6"><Alert tone="info">Your account was created with a temporary password. Choose a new one to continue.</Alert></div>}
       {user?.restriction === 'two-factor' && <div className="mb-6"><Alert tone="info">Staff accounts must use two-step verification. Turn it on below to continue.</Alert></div>}

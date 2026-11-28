@@ -53,3 +53,12 @@ export function personName(u?: string | { firstname?: string; lastname?: string;
   if (!u || typeof u === 'string') return '';
   return [u.firstname, u.lastname].filter(Boolean).join(' ') || u.email || '';
 }
+
+/** Share of ratings that are 4 or 5 stars, as a whole percent. */
+export const positivePercent = (count?: number, positive?: number) => (count ? Math.round(((positive ?? 0) / count) * 100) : 0);
+
+/** More than 65% positive ratings is Excellent, anything lower is Good. No ratings, no label. */
+export function ratingBand(count?: number, positive?: number): 'excellent' | 'good' | null {
+  if (!count) return null;
+  return (positive ?? 0) / count > 0.65 ? 'excellent' : 'good';
+}

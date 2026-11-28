@@ -16,6 +16,7 @@ let resetEmail: string | null = null;
 function normalise(d: Db): Db {
   d.products.forEach((p: Rec) => { if (Array.isArray(p.images) && p.images.some((u: unknown) => typeof u === 'string' && u.startsWith('blob:'))) p.images = [productArt(String(p.name), 'cart')]; });
   if (!d.reviews) seedReviews(d);
+  d.products.forEach((p: Rec) => { if (p.ratingPositive === undefined) refreshRating(d, p._id); if (p.dealEndsAt === undefined) p.dealEndsAt = null; });
   d.orders.forEach((o) => { if (o.status === 'delivered' && !o.deliveredAt) o.deliveredAt = o.updatedAt ?? o.createdAt; });
   return d;
 }
@@ -41,6 +42,13 @@ export function resetDemo() {
 const fail = (status: number, message: string): never => { throw new HttpError(status, { statusCode: status, message }, message); };
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const nowIso = () => new Date().toISOString();
+const dealEnd = (days: unknown, hours: unknown): string | null | undefined => {
+  if (days === undefined && hours === undefined) return undefined;
+  const d = Math.floor(Number(days) || 0); const h = Math.floor(Number(hours) || 0);
+  if (d < 0 || d > 365 || h < 0 || h > 23) return fail(400, 'days must be 0 to 365 and hours 0 to 23');
+  const ms = (d * 24 + h) * 3600 * 1000;
+  return ms > 0 ? new Date(Date.now() + ms).toISOString() : null;
+};
 
 interface Ctx { method: string; params: string[]; query: Record<string, any>; body: Rec; user: Rec | null; form: FormData | null }
 
@@ -274,6 +282,8 @@ on('POST', '/products', (c) => {
   const sku = String(f.get('sku') ?? `HSA-${Date.now().toString().slice(-6)}`);
   if (load().products.some((p) => p.sku === sku)) return fail(409, 'A product with this SKU already exists');
   const p: Rec = { _id: newId(name), name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), sku, description: String(f.get('description') ?? ''), price, discountPrice: 0, images: imagesFromForm(f, name), category: String(f.get('category') ?? ''), brand: String(f.get('brand') ?? ''), featured: f.get('featured') === 'true', isActive: true, createdAt: nowIso() };
+  const deal = f.get('dealDays') !== null || f.get('dealHours') !== null ? dealEnd(f.get('dealDays') ?? undefined, f.get('dealHours') ?? undefined) : undefined;
+  p.dealEndsAt = deal ?? null;
   load().products.unshift(p);
   record(actor, 'product.create', { type: 'product', id: p._id }, { name });
   save();
@@ -285,6 +295,8 @@ on('PUT', '/products/:id', (c) => {
   if (!p) return fail(404, 'Product not found');
   const fields = ['name', 'description', 'price', 'sku', 'featured', 'isActive', 'category', 'brand'].filter((k) => c.body[k] !== undefined);
   fields.forEach((k) => { p[k] = c.body[k]; });
+  const deal = dealEnd(c.body.dealDays, c.body.dealHours);
+  if (deal !== undefined) { p.dealEndsAt = deal; fields.push('dealEndsAt'); }
   record(actor, 'product.update', { type: 'product', id: p._id }, { fields });
   save();
   return withTaxonomy(p);

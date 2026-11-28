@@ -6,7 +6,7 @@ import { errorMessage } from '../api/client';
 import { Alert, EmptyState, ErrorState, Modal, PageLoader, Pager, Spinner, useAsync } from './ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { dateShort, ROLE_LABEL, isStaff } from '../lib/format';
+import { dateShort, ROLE_LABEL, isStaff, positivePercent, ratingBand } from '../lib/format';
 import type { Review } from '../types';
 
 export function Stars({ value, size = 16, className = '' }: { value: number; size?: number; className?: string }) {
@@ -36,13 +36,22 @@ export function StarInput({ value, onChange, size = 28 }: { value: number; onCha
   );
 }
 
-export function RatingLine({ average, count, className = '' }: { average?: number; count?: number; className?: string }) {
+export function RatingBand({ count, positive, className = '' }: { count?: number; positive?: number; className?: string }) {
+  const band = ratingBand(count, positive);
+  if (!band) return null;
+  return band === 'excellent'
+    ? <span className={`font-bold text-emerald-600 ${className}`} title={`${positivePercent(count, positive)}% of buyers rated it 4 or 5 stars`}>Excellent</span>
+    : <span className={`font-bold text-amber-600 ${className}`} title={`${positivePercent(count, positive)}% of buyers rated it 4 or 5 stars`}>Good</span>;
+}
+
+export function RatingLine({ average, count, positive, className = '' }: { average?: number; count?: number; positive?: number; className?: string }) {
   if (!count) return <p className={`text-xs text-mute ${className}`}>No reviews yet</p>;
   return (
-    <p className={`flex items-center gap-1.5 text-xs ${className}`}>
+    <p className={`flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs ${className}`}>
       <Stars value={average ?? 0} size={13} />
       <span className="font-semibold text-ink">{(average ?? 0).toFixed(1)}</span>
       <span className="text-mute">({count})</span>
+      <RatingBand count={count} positive={positive} />
     </p>
   );
 }
@@ -169,7 +178,7 @@ export function ReviewSection({ productId, onSummary }: { productId: string; onS
               <>
                 <div className="flex items-end gap-3"><p className="font-display text-5xl font-extrabold">{sum.average.toFixed(1)}</p><p className="pb-1.5 text-sm text-mute">out of 5</p></div>
                 <Stars value={sum.average} size={20} className="mt-2" />
-                <p className="mt-1 text-sm text-mute">{sum.count} rating{sum.count === 1 ? '' : 's'}</p>
+                <p className="mt-1 text-sm text-mute">{sum.count} rating{sum.count === 1 ? '' : 's'} · <RatingBand count={sum.count} positive={sum.breakdown['4'] + sum.breakdown['5']} /> ({positivePercent(sum.count, sum.breakdown['4'] + sum.breakdown['5'])}% positive)</p>
                 <div className="mt-4 space-y-1.5">
                   {([5, 4, 3, 2, 1] as const).map((n) => {
                     const c = sum.breakdown[String(n) as '1'];

@@ -18,6 +18,12 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { FileUpload } from 'src/aws/aws.file-upload';
 import { SIGNATURE_LENGTH } from './dto/visual-search.dto';
 
+export function dealEnd(days?: number, hours?: number): Date | null | undefined {
+  if (days === undefined && hours === undefined) return undefined;
+  const ms = ((days ?? 0) * 24 + (hours ?? 0)) * 3600 * 1000;
+  return ms > 0 ? new Date(Date.now() + ms) : null;
+}
+
 export function parseSignature(raw?: string | number[]): number[] | undefined {
   if (raw === undefined || raw === null || raw === '') return undefined;
   try {
@@ -60,10 +66,11 @@ export class ProductsService {
         );
       }
     }
-    const { visualSignature, ...rest } = dto;
+    const { visualSignature, dealDays, dealHours, ...rest } = dto;
     return this.productModel.create({
       ...rest,
       visualSignature: parseSignature(visualSignature),
+      dealEndsAt: dealEnd(dealDays, dealHours) ?? null,
       slug,
       sku: dto.sku.toUpperCase(),
       images: uploadedImages,
@@ -159,7 +166,10 @@ export class ProductsService {
     if (exists) {
       throw new BadRequestException('Product already exists.');
     }
-    const data: Record<string, unknown> = { ...update };
+    const { dealDays, dealHours, ...fields } = update;
+    const data: Record<string, unknown> = { ...fields };
+    const deal = dealEnd(dealDays, dealHours);
+    if (deal !== undefined) data.dealEndsAt = deal;
     if (update.visualSignature !== undefined) {
       data.visualSignature = parseSignature(update.visualSignature);
     }

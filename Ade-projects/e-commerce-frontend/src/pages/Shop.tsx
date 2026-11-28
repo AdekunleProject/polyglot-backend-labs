@@ -6,7 +6,7 @@ import { errorMessage } from '../api/client';
 import { signatureFromSource } from '../lib/visual';
 import { listBrands, listCategories, listProducts, type ProductQuery } from '../api/catalog';
 import { Alert, EmptyState, ErrorState, Modal, Pager, Spinner, useAsync } from '../components/ui';
-import { ProductCard, ProductGridSkeleton } from '../components/ProductCard';
+import { ProductCard, ProductRail, ProductGridSkeleton } from '../components/ProductCard';
 
 const SORTS: { label: string; sortBy: NonNullable<ProductQuery['sortBy']>; sortOrder: 'asc' | 'desc' }[] = [
   { label: 'Newest', sortBy: 'createdAt', sortOrder: 'desc' },
@@ -133,13 +133,15 @@ export default function Shop() {
           {photo.results.length === 0 ? (
             <p className="p-6 text-sm text-mute">No products with photos to compare yet.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-              {photo.results.slice(0, 12).map((p) => (
-                <div key={p._id} className="relative">
-                  <span className="absolute right-2 top-2 z-10 rounded-full bg-night-900/85 px-2 py-0.5 text-[11px] font-bold text-gold-300 backdrop-blur">{p.similarity}% match</span>
-                  <ProductCard product={p} />
-                </div>
-              ))}
+            <div className="p-4">
+              <ProductRail>
+                {photo.results.slice(0, 12).map((p) => (
+                  <div key={p._id} className="relative h-full">
+                    <span className="absolute right-2 top-2 z-10 rounded-full bg-night-900/85 px-2 py-0.5 text-[11px] font-bold text-gold-300 backdrop-blur">{p.similarity}% match</span>
+                    <ProductCard product={p} />
+                  </div>
+                ))}
+              </ProductRail>
             </div>
           )}
         </section>

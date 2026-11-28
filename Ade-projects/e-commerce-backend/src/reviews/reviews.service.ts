@@ -31,13 +31,14 @@ export class ReviewsService {
   }
 
   private async refreshProduct(productId: Types.ObjectId | string) {
-    const [stats] = await this.reviewModel.aggregate<{ average: number; count: number }>([
+    const [stats] = await this.reviewModel.aggregate<{ average: number; count: number; positive: number }>([
       { $match: { product: new Types.ObjectId(String(productId)) } },
-      { $group: { _id: '$product', average: { $avg: '$rating' }, count: { $sum: 1 } } },
+      { $group: { _id: '$product', average: { $avg: '$rating' }, count: { $sum: 1 }, positive: { $sum: { $cond: [{ $gte: ['$rating', 4] }, 1, 0] } } } },
     ]);
     await this.productModel.findByIdAndUpdate(productId, {
       ratingAverage: stats ? Math.round(stats.average * 10) / 10 : 0,
       ratingCount: stats?.count ?? 0,
+      ratingPositive: stats?.positive ?? 0,
     });
   }
 

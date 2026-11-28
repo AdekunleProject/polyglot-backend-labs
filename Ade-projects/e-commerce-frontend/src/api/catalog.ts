@@ -17,7 +17,7 @@ export interface ProductQuery {
 export const listProducts = (q: ProductQuery = {}) => api.get<Paginated<Product>>('/products', q);
 export const getProduct = (id: string) => api.get<Product>(`/products/${id}`);
 export const createProduct = (form: FormData) => api.post<Product>('/products', form);
-export const updateProduct = (id: string, body: Partial<Pick<Product, 'name' | 'description' | 'price' | 'sku' | 'featured' | 'isActive'>> & { category?: string; brand?: string }) =>
+export const updateProduct = (id: string, body: Partial<Pick<Product, 'name' | 'description' | 'price' | 'sku' | 'featured' | 'isActive'>> & { category?: string; brand?: string; dealDays?: number; dealHours?: number }) =>
   api.put<Product>(`/products/${id}`, body);
 export const addProductImages = (id: string, form: FormData) => api.post<Product>(`/products/${id}/images`, form);
 export const removeProductImage = (id: string, url: string) => api.delete<Product>(`/products/${id}/images`, { url });

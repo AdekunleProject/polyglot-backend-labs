@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { LuBoxes, LuLayers, LuPencil, LuPlus, LuSearch, LuTrash2, LuX } from 'react-icons/lu';
+import { Countdown } from '../../components/Countdown';
 import { signatureFromSource } from '../../lib/visual';
 import * as cat from '../../api/catalog';
 import { errorMessage } from '../../api/client';
@@ -79,7 +80,7 @@ export default function Products() {
 function ProductForm({ product, brands, categories, onClose, onSaved }: { product: Product | null; brands: Brand[]; categories: Category[]; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [f, setF] = useState({ name: product?.name ?? '', sku: product?.sku ?? '', price: String(product?.price ?? ''), description: product?.description ?? '',
-    category: idOf(product?.category as Category | string | undefined), brand: idOf(product?.brand as Brand | string | undefined), featured: !!product?.featured, isActive: product?.isActive ?? true });
+    category: idOf(product?.category as Category | string | undefined), brand: idOf(product?.brand as Brand | string | undefined), featured: !!product?.featured, isActive: product?.isActive ?? true, dealDays: '', dealHours: '' });
   const [files, setFiles] = useState<File[]>([]);
   const [photos, setPhotos] = useState<string[]>(product?.images ?? []);
   const [busy, setBusy] = useState(false);
@@ -91,9 +92,14 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
     setErr('');
     if (!f.name.trim() || !f.sku.trim() || !(Number(f.price) > 0) || !f.category || !f.brand || !f.description.trim()) { setErr('Name, SKU, price, category, brand and description are all required.'); return; }
     setBusy(true);
+    const hasDeal = f.dealDays.trim() !== '' || f.dealHours.trim() !== '';
+    const days = Math.max(0, Math.floor(Number(f.dealDays) || 0));
+    const hours = Math.max(0, Math.floor(Number(f.dealHours) || 0));
+    if (hasDeal && (days > 365 || hours > 23)) { setErr('Countdown: days up to 365 and hours up to 23.'); return; }
+    const dealPayload = hasDeal ? { dealDays: days, dealHours: hours } : {};
     try {
       if (product) {
-        await cat.updateProduct(product._id, { name: f.name.trim(), sku: f.sku.trim(), price: Number(f.price), description: f.description.trim(), category: f.category, brand: f.brand, featured: f.featured, isActive: f.isActive });
+        await cat.updateProduct(product._id, { name: f.name.trim(), sku: f.sku.trim(), price: Number(f.price), description: f.description.trim(), category: f.category, brand: f.brand, featured: f.featured, isActive: f.isActive, ...dealPayload });
         if (files.length) {
           const fd = new FormData();
           files.forEach((file) => fd.append('images', file));
@@ -105,6 +111,7 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
         const fd = new FormData();
         fd.append('name', f.name.trim()); fd.append('sku', f.sku.trim()); fd.append('price', f.price); fd.append('description', f.description.trim());
         fd.append('category', f.category); fd.append('brand', f.brand); fd.append('featured', String(f.featured));
+        if (hasDeal) { fd.append('dealDays', String(days)); fd.append('dealHours', String(hours)); }
         files.forEach((file) => fd.append('images', file));
         if (files.length) { try { fd.append('visualSignature', JSON.stringify(await signatureFromSource(files[0]))); } catch { /* the product is still created without a visual signature */ } }
         await cat.createProduct(fd);
@@ -141,6 +148,15 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
           </div>
         )}
         <Field label="Description"><textarea className="field min-h-24" value={f.description} onChange={(e) => set('description', e.target.value)} /></Field>
+        <div className="rounded-2xl border border-line bg-brand-50/40 p-4">
+          <p className="font-display text-sm font-bold">Deal countdown</p>
+          <p className="mt-0.5 text-xs text-mute">Shows a ticking timer on the product. Enter how long it should run from now. Enter 0 and 0 to remove it. Leave both empty to keep it as it is.</p>
+          {product?.dealEndsAt && new Date(product.dealEndsAt).getTime() > Date.now() && <Countdown endsAt={product.dealEndsAt} variant="block" className="mt-3" />}
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="Days"><input className="field" type="number" min={0} max={365} inputMode="numeric" placeholder="e.g. 3" value={f.dealDays} onChange={(e) => set('dealDays', e.target.value)} /></Field>
+            <Field label="Hours"><input className="field" type="number" min={0} max={23} inputMode="numeric" placeholder="e.g. 12" value={f.dealHours} onChange={(e) => set('dealHours', e.target.value)} /></Field>
+          </div>
+        </div>
         <div className="flex flex-wrap gap-6 text-sm font-medium">
           <label className="flex items-center gap-2"><input type="checkbox" checked={f.featured} onChange={(e) => set('featured', e.target.checked)} className="h-4 w-4 accent-brand-600" /> Featured on the home page</label>
           {product && <label className="flex items-center gap-2"><input type="checkbox" checked={f.isActive} onChange={(e) => set('isActive', e.target.checked)} className="h-4 w-4 accent-brand-600" /> Visible in the store</label>}

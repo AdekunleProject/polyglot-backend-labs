@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { LuArrowRight, LuHeadphones, LuRotateCcw, LuShieldCheck, LuSparkles, LuTruck, LuWatch, LuSmartphone, LuLaptop, LuShirt, LuHouse, LuFootprints, LuBriefcase, LuFlower } from 'react-icons/lu';
 import { listBrands, listCategories, listProducts } from '../api/catalog';
 import { ErrorState, SectionHead, useAsync } from '../components/ui';
-import { ProductCard, ProductGridSkeleton, ProductImage } from '../components/ProductCard';
+import { ProductCard, ProductRail, ProductGridSkeleton, ProductImage } from '../components/ProductCard';
 import { money } from '../lib/format';
 import type { Product } from '../types';
 
@@ -87,9 +87,9 @@ export default function Home() {
 
       <section className="container-x mt-20">
         <SectionHead eyebrow="Browse" title="Shop by category" action={<Link to="/shop" className="hidden text-sm font-semibold text-brand-600 hover:underline sm:block">View all →</Link>} />
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-5">
+        <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-px-4 px-4 pb-3 [scrollbar-width:none] md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 md:pb-0 lg:grid-cols-5 xl:grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] [&::-webkit-scrollbar]:hidden">
           {(cats.data ?? []).map((c, i) => (
-            <Link key={c._id} to={`/shop?category=${c._id}`} className="group relative overflow-hidden rounded-2xl p-5 text-white shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift">
+            <Link key={c._id} to={`/shop?category=${c._id}`} className="group relative w-40 shrink-0 snap-start overflow-hidden md:w-auto rounded-2xl p-5 text-white shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift">
               <div className={`absolute inset-0 bg-gradient-to-br ${CAT_TONES[i % CAT_TONES.length]}`} />
               <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/15 transition duration-500 group-hover:scale-150" />
               <div className="relative">
@@ -105,9 +105,9 @@ export default function Home() {
       <section className="container-x mt-20">
         <SectionHead eyebrow="Hand-picked" title="Featured this week" action={<Link to="/shop?featured=true" className="text-sm font-semibold text-brand-600 hover:underline">See all →</Link>} />
         {featured.loading ? <ProductGridSkeleton /> : featured.error ? <ErrorState error={featured.error} onRetry={featured.reload} /> : (
-          <div className="grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-3 xl:grid-cols-4">
+          <ProductRail>
             {featured.data!.data.slice(0, 8).map((p) => <ProductCard key={p._id} product={p} />)}
-          </div>
+          </ProductRail>
         )}
       </section>
 
@@ -133,7 +133,7 @@ export default function Home() {
       <section className="container-x mt-20">
         <SectionHead eyebrow="Just in" title="New arrivals" />
         {fresh.loading ? <ProductGridSkeleton n={4} /> : (
-          <div className="grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-4">{(fresh.data?.data ?? []).map((p) => <ProductCard key={p._id} product={p} />)}</div>
+          <ProductRail>{(fresh.data?.data ?? []).map((p) => <ProductCard key={p._id} product={p} />)}</ProductRail>
         )}
       </section>
 

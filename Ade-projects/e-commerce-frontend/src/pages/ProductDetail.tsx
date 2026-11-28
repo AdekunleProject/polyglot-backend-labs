@@ -4,8 +4,11 @@ import { LuMinus, LuPlus, LuRotateCcw, LuShieldCheck, LuShoppingBag, LuTruck } f
 import { getProduct, listProducts, listVariants } from '../api/catalog';
 import { errorMessage } from '../api/client';
 import { Breadcrumb, ErrorState, PageLoader, SectionHead, Spinner, useAsync } from '../components/ui';
-import { ProductCard, ProductImage } from '../components/ProductCard';
+import { ProductCard, ProductRail, ProductImage } from '../components/ProductCard';
 import { useAuth } from '../context/AuthContext';
+import { Countdown } from '../components/Countdown';
+import { ShareButton } from '../components/Share';
+import { appUrl } from '../lib/url';
 import { RatingLine, ReviewSection } from '../components/Reviews';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
@@ -87,13 +90,15 @@ export default function ProductDetail() {
           <div className="flex flex-wrap items-center gap-2">
             {nameOf(p.brand) && <Link to={`/shop?brand=${idOf(p.brand)}`} className="badge-violet">{nameOf(p.brand)}</Link>}
             {p.featured && <span className="badge-amber">Featured</span>}
+            <ShareButton target={{ title: p.name, text: `${p.name} on Harlim ShopAll for ${money(price)}.`, url: appUrl(`/product/${id}`) }} className="btn-ghost btn-sm ml-auto" />
           </div>
           <h1 className="mt-3 font-display text-3xl font-extrabold leading-tight sm:text-4xl">{p.name}</h1>
           <button type="button" className="mt-3 text-left" onClick={() => document.getElementById('reviews')?.scrollIntoView({ behavior: 'smooth' })} aria-label="Jump to ratings and comments">
-            <RatingLine average={p.ratingAverage} count={p.ratingCount} className="text-sm" />
+            <RatingLine average={p.ratingAverage} count={p.ratingCount} positive={p.ratingPositive} className="text-sm" />
           </button>
           <p className="mt-4 font-display text-4xl font-extrabold gradient-text">{money(price)}</p>
-          <p className="mt-1 text-xs text-mute">SKU {selected?.sku ?? p.sku} · Delivery fee shown at checkout</p>
+          <Countdown endsAt={p.dealEndsAt} variant="block" className="mt-3" />
+          <p className="mt-2 text-xs text-mute">SKU {selected?.sku ?? p.sku} · Delivery fee shown at checkout</p>
           <p className="mt-6 leading-relaxed text-ink/75">{p.description}</p>
 
           {variants.loading ? <div className="mt-6"><Spinner className="text-brand-600" /></div> : list.length === 0 ? (
@@ -142,12 +147,19 @@ export default function ProductDetail() {
         </div>
       </div>
 
+      {!staff && list.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-line bg-white/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
+          <div className="min-w-0"><p className="truncate text-[11px] text-mute">{p.name}</p><p className="font-display text-lg font-extrabold leading-none">{money(price)}</p></div>
+          <button className="btn-primary ml-auto" disabled={!inStock || busy} onClick={() => addToCart(false)}>{busy ? <Spinner /> : <LuShoppingBag />} {inStock ? 'Add to cart' : 'Sold out'}</button>
+        </div>
+      )}
+
       <ReviewSection productId={id} onSummary={product.reload} />
 
       {(related.data?.length ?? 0) > 0 && (
         <section className="mt-20">
           <SectionHead eyebrow="You may also like" title="Similar products" />
-          <div className="grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-4">{related.data!.map((x) => <ProductCard key={x._id} product={x} />)}</div>
+          <ProductRail>{related.data!.map((x) => <ProductCard key={x._id} product={x} />)}</ProductRail>
         </section>
       )}
     </div>

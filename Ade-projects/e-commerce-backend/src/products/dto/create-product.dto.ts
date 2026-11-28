@@ -1,15 +1,29 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsArray,
+  IsInt,
   IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
 } from 'class-validator';
 
 export class CreateProductDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  dealDays?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  dealHours?: number;
+
   @IsOptional()
   @IsString()
   visualSignature?: string;

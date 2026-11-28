@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom';
 import { LuArrowRight, LuClock, LuPackage, LuTruck, LuWallet, LuX } from 'react-icons/lu';
 import { dashboard } from '../api/admin';
 import { ErrorState, PageLoader, SectionHead, Stat, StatusBadge, useAsync } from '../components/ui';
+import { ShareButton } from '../components/Share';
+import { appUrl } from '../lib/url';
 import { useAuth } from '../context/AuthContext';
 import { dateShort, money, ORDER_PAY_TONE, ORDER_TONE, titleCase } from '../lib/format';
 
@@ -20,7 +22,7 @@ export default function Account() {
         <p className="text-sm text-white/60">Welcome back</p>
         <h1 className="mt-1 font-display text-3xl font-extrabold sm:text-4xl">Hello, {user?.firstname}</h1>
         <p className="mt-2 max-w-lg text-white/70">Here is what is happening with your orders and spending.</p>
-        <div className="mt-6 flex flex-wrap gap-3"><Link to="/shop" className="btn-primary">Keep shopping <LuArrowRight /></Link><Link to="/account/security" className="btn-light">Profile & security</Link></div>
+        <div className="mt-6 flex flex-wrap gap-3"><Link to="/shop" className="btn-primary">Keep shopping <LuArrowRight /></Link><Link to="/account/security" className="btn-light">Profile & security</Link><ShareButton label="Share my profile" className="btn-light" target={{ title: 'Harlim ShopAll', text: `${user?.firstname} ${user?.lastname} invites you to shop on Harlim ShopAll.`, url: appUrl('/') }} /></div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
