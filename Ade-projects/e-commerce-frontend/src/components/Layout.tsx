@@ -31,7 +31,7 @@ export function DemoBanner() {
   );
 }
 
-function Bell() {
+export function Bell() {
   const { user } = useAuth();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);

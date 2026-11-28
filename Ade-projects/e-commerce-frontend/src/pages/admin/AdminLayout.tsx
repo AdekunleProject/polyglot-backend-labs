@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LuBadgeDollarSign, LuBoxes, LuChartColumn, LuClipboardList, LuExternalLink, LuLayoutDashboard, LuLogOut, LuMenu, LuPackage, LuRotateCcw, LuScrollText, LuTags, LuUsers, LuX } from 'react-icons/lu';
+import { LuBadgeDollarSign, LuBoxes, LuChartColumn, LuClipboardList, LuExternalLink, LuLayoutDashboard, LuLogOut, LuMenu, LuPackage, LuRotateCcw, LuScrollText, LuStar, LuTags, LuUsers, LuX } from 'react-icons/lu';
 import type { IconType } from 'react-icons';
 import { Logo } from '../../components/Logo';
-import { DemoBanner } from '../../components/Layout';
+import { Bell, DemoBanner } from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { ROLE_LABEL } from '../../lib/format';
 import type { Role } from '../../types';
@@ -17,6 +17,7 @@ const ITEMS: Item[] = [
   { to: '/admin/catalog', label: 'Brands & categories', icon: LuTags, roles: ALL },
   { to: '/admin/orders', label: 'Orders', icon: LuPackage, roles: ALL },
   { to: '/admin/payments', label: 'Payments', icon: LuBadgeDollarSign, roles: ['admin', 'superadmin'] },
+  { to: '/admin/feedback', label: 'Feedback', icon: LuStar, roles: ALL },
   { to: '/admin/refunds', label: 'Refunds', icon: LuRotateCcw, roles: ALL },
   { to: '/admin/users', label: 'People', icon: LuUsers, roles: ALL },
   { to: '/admin/reports', label: 'Reports', icon: LuChartColumn, roles: ALL },
@@ -61,8 +62,9 @@ export default function AdminLayout() {
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-white/85 px-4 py-3 backdrop-blur lg:hidden">
             <Logo compact />
-            <button onClick={() => setOpen(true)} aria-label="Open menu" className="grid h-10 w-10 place-items-center rounded-xl border border-line text-xl"><LuMenu /></button>
+            <div className="flex items-center gap-2"><Bell /><button onClick={() => setOpen(true)} aria-label="Open menu" className="grid h-10 w-10 place-items-center rounded-xl border border-line text-xl"><LuMenu /></button></div>
           </header>
+          <div className="hidden items-center justify-end border-b border-line bg-white/70 px-8 py-2 backdrop-blur lg:flex"><Bell /></div>
           {open && (
             <div className="fixed inset-0 z-50 lg:hidden">
               <div className="absolute inset-0 bg-night-950/60" onClick={() => setOpen(false)} />

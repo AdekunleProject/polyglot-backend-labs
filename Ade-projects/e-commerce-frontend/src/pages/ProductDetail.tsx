@@ -6,6 +6,7 @@ import { errorMessage } from '../api/client';
 import { Breadcrumb, ErrorState, PageLoader, SectionHead, Spinner, useAsync } from '../components/ui';
 import { ProductCard, ProductImage } from '../components/ProductCard';
 import { useAuth } from '../context/AuthContext';
+import { RatingLine, ReviewSection } from '../components/Reviews';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
 import { idOf, money, nameOf, priceOf } from '../lib/format';
@@ -47,7 +48,7 @@ export default function ProductDetail() {
   const inStock = (selected?.stock ?? 0) > 0;
   const available = (k: string, value: string) => list.some((v) => v.stock > 0 && v.attributes?.[k] === value && keys.every((o) => o === k || !chosen[o] || v.attributes?.[o] === chosen[o]));
 
-  if (product.loading) return <PageLoader label="Loading product" />;
+  if (product.loading && !product.data) return <PageLoader label="Loading product" />;
   if (product.error || !p) return <div className="container-x py-12"><ErrorState error={product.error ?? new Error('Not found')} onRetry={product.reload} /></div>;
 
   const images = (selected?.images?.length ? selected.images : p.images) ?? [];
@@ -88,6 +89,9 @@ export default function ProductDetail() {
             {p.featured && <span className="badge-amber">Featured</span>}
           </div>
           <h1 className="mt-3 font-display text-3xl font-extrabold leading-tight sm:text-4xl">{p.name}</h1>
+          <button type="button" className="mt-3 text-left" onClick={() => document.getElementById('reviews')?.scrollIntoView({ behavior: 'smooth' })} aria-label="Jump to ratings and comments">
+            <RatingLine average={p.ratingAverage} count={p.ratingCount} className="text-sm" />
+          </button>
           <p className="mt-4 font-display text-4xl font-extrabold gradient-text">{money(price)}</p>
           <p className="mt-1 text-xs text-mute">SKU {selected?.sku ?? p.sku} · Delivery fee shown at checkout</p>
           <p className="mt-6 leading-relaxed text-ink/75">{p.description}</p>
@@ -137,6 +141,8 @@ export default function ProductDetail() {
           </ul>
         </div>
       </div>
+
+      <ReviewSection productId={id} onSummary={product.reload} />
 
       {(related.data?.length ?? 0) > 0 && (
         <section className="mt-20">

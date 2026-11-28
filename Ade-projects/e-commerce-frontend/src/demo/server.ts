@@ -2,7 +2,8 @@
 import { HttpError } from '../api/http-error';
 import type { RequestOptions } from '../api/client';
 import { productArt } from '../lib/art';
-import { buildSeed, DEMO_CODE, newId, type Db, type Rec } from './seed';
+import { signatureFromSource, similarityPercent } from '../lib/visual';
+import { buildSeed, DEMO_CODE, newId, refreshRating, seedReviews, type Db, type Rec } from './seed';
 
 /** Demo mode runs the whole store in the browser, with the same routes, roles and rules as the real API. */
 export const DEMO: boolean = import.meta.env.VITE_DEMO === 'true';
@@ -14,6 +15,7 @@ let resetEmail: string | null = null;
 
 function normalise(d: Db): Db {
   d.products.forEach((p: Rec) => { if (Array.isArray(p.images) && p.images.some((u: unknown) => typeof u === 'string' && u.startsWith('blob:'))) p.images = [productArt(String(p.name), 'cart')]; });
+  if (!d.reviews) seedReviews(d);
   d.orders.forEach((o) => { if (o.status === 'delivered' && !o.deliveredAt) o.deliveredAt = o.updatedAt ?? o.createdAt; });
   return d;
 }
@@ -299,6 +301,124 @@ on('POST', '/products/:id/images', (c) => {
   record(actor, 'product.update', { type: 'product', id: p._id }, { fields: ['images'] });
   save();
   return withTaxonomy(p);
+});
+/* --------------------------------- reviews --------------------------------- */
+const STAFF_ROLES = ['manager', 'admin', 'superadmin'];
+const personLabel = (u: Rec) => `${u.firstname} ${u.lastname}`.trim();
+const summaryFor = (productId: string) => {
+  const list = load().reviews.filter((r) => r.product === productId);
+  const breakdown: Rec = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+  list.forEach((r) => { breakdown[String(r.rating)] += 1; });
+  const average = list.length ? Math.round((list.reduce((t, r) => t + r.rating, 0) / list.length) * 10) / 10 : 0;
+  return { average, count: list.length, breakdown };
+};
+const reviewPage = (list: Rec[], q: Rec, defLimit: number) => {
+  const sorted = [...list].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const p = pagination(sorted, q, defLimit);
+  return { slice: p.slice, meta: { total: p.total, page: p.page, limit: p.limit, totalPages: Math.max(1, Math.ceil(p.total / p.limit)) } };
+};
+const validRating = (v: unknown) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 5;
+const reviewById = (id: string) => load().reviews.find((r) => r._id === id);
+
+on('GET', '/products/:id/reviews', (c) => {
+  if (!productById(c.params[0])) return fail(404, 'Product not found.');
+  let list = load().reviews.filter((r) => r.product === c.params[0]);
+  if (c.query.rating) list = list.filter((r) => r.rating === Number(c.query.rating));
+  const { slice, meta } = reviewPage(list, c.query, 10);
+  return { data: slice, meta, summary: summaryFor(c.params[0]) };
+});
+on('POST', '/products/:id/reviews', (c) => {
+  const actor = guard(c);
+  const d = load();
+  const p = productById(c.params[0]);
+  if (!p || !p.isActive) return fail(404, 'Product not found.');
+  if (!validRating(c.body.rating)) return fail(400, 'Rating must be a whole number from 1 to 5.');
+  const comment = String(c.body.comment ?? '').trim();
+  if (comment.length > 1000) return fail(400, 'Comment must be 1000 characters or fewer.');
+  if (d.reviews.some((r) => r.product === p._id && r.user === actor.id)) return fail(400, 'You have already reviewed this product. Edit your review instead.');
+  const review: Rec = { _id: newId('rv'), product: p._id, user: actor.id, authorName: personLabel(actor), authorRole: actor.role, rating: Number(c.body.rating), comment, edited: false, replies: [], createdAt: nowIso(), updatedAt: nowIso() };
+  d.reviews.unshift(review);
+  refreshRating(d, p._id);
+  staffIds('manager', 'admin').filter((id) => id !== actor.id).forEach((id) => notify(id, 'NEW_REVIEW', `New ${review.rating}-star review`, `${review.authorName} rated "${p.name}" ${review.rating}/5${comment ? `: ${comment.slice(0, 120)}` : '.'}`, '/admin/feedback'));
+  save();
+  return review;
+});
+on('GET', '/reviews', (c) => {
+  guard(c, ...STAFF_ROLES);
+  const d = load();
+  let list = d.reviews;
+  if (c.query.rating) list = list.filter((r) => r.rating === Number(c.query.rating));
+  const { slice, meta } = reviewPage(list, c.query, 20);
+  return { data: slice.map((r) => { const p = productById(r.product); return { ...r, product: p ? { _id: p._id, name: p.name, images: p.images } : r.product }; }), meta };
+});
+on('PUT', '/reviews/:id', (c) => {
+  const actor = guard(c);
+  const r = reviewById(c.params[0]);
+  if (!r) return fail(404, 'Review not found.');
+  if (r.user !== actor.id && !STAFF_ROLES.includes(actor.role)) return fail(403, 'You can only edit your own review.');
+  if (c.body.rating === undefined && c.body.comment === undefined) return fail(400, 'Nothing to update.');
+  if (c.body.rating !== undefined) { if (!validRating(c.body.rating)) return fail(400, 'Rating must be a whole number from 1 to 5.'); r.rating = Number(c.body.rating); }
+  if (c.body.comment !== undefined) { const t = String(c.body.comment).trim(); if (t.length > 1000) return fail(400, 'Comment must be 1000 characters or fewer.'); r.comment = t; }
+  r.edited = true; r.updatedAt = nowIso();
+  refreshRating(load(), r.product);
+  if (STAFF_ROLES.includes(actor.role)) record(actor, 'review.update', { type: 'review', id: r._id }, { fields: Object.keys(c.body) });
+  save();
+  return r;
+});
+on('DELETE', '/reviews/:id', (c) => {
+  const actor = guard(c);
+  const d = load();
+  const r = reviewById(c.params[0]);
+  if (!r) return fail(404, 'Review not found.');
+  if (r.user !== actor.id && !STAFF_ROLES.includes(actor.role)) return fail(403, 'You can only delete your own review.');
+  d.reviews = d.reviews.filter((x) => x._id !== r._id);
+  refreshRating(d, r.product);
+  if (STAFF_ROLES.includes(actor.role)) record(actor, 'review.delete', { type: 'review', id: r._id });
+  save();
+  return { message: 'Review deleted.', productId: r.product };
+});
+on('POST', '/reviews/:id/replies', (c) => {
+  const actor = guard(c, ...STAFF_ROLES);
+  const r = reviewById(c.params[0]);
+  if (!r) return fail(404, 'Review not found.');
+  const text = String(c.body.text ?? '').trim();
+  if (!text) return fail(400, 'Reply text is required.');
+  if (text.length > 1000) return fail(400, 'Reply must be 1000 characters or fewer.');
+  r.replies.push({ _id: newId('rp'), user: actor.id, authorName: personLabel(actor), authorRole: actor.role, text, createdAt: nowIso() });
+  if (r.user !== actor.id) notify(r.user, 'REVIEW_REPLY', 'The store replied to your review', text.slice(0, 140), `/product/${r.product}`);
+  record(actor, 'review.reply', { type: 'review', id: r._id });
+  save();
+  return r;
+});
+on('DELETE', '/reviews/:id/replies/:rid', (c) => {
+  const actor = guard(c, ...STAFF_ROLES);
+  const r = reviewById(c.params[0]);
+  if (!r) return fail(404, 'Review not found.');
+  const before = r.replies.length;
+  r.replies = r.replies.filter((x: Rec) => x._id !== c.params[1]);
+  if (r.replies.length === before) return fail(404, 'Reply not found.');
+  record(actor, 'review.reply.delete', { type: 'review', id: r._id });
+  save();
+  return r;
+});
+
+/* ------------------------------- visual search ------------------------------ */
+const signatures = new Map<string, number[]>();
+async function warmSignatures() {
+  for (const p of load().products) {
+    const src = (p.images as string[] | undefined)?.[0] ?? productArt(String(p.name));
+    if (signatures.has(src)) continue;
+    try { signatures.set(src, await signatureFromSource(src)); } catch { signatures.set(src, []); }
+  }
+}
+on('POST', '/products/visual-search', (c) => {
+  const sig = c.body.signature as number[] | undefined;
+  if (!Array.isArray(sig) || sig.length !== 48 || sig.some((n) => typeof n !== 'number' || !Number.isFinite(n))) return fail(400, 'signature must be 48 numbers between 0 and 1.');
+  return load().products.filter((p) => p.isActive).map((p) => {
+    const src = (p.images as string[] | undefined)?.[0] ?? productArt(String(p.name));
+    const other = signatures.get(src) ?? [];
+    return other.length ? { ...withTaxonomy(p), similarity: similarityPercent(sig, other) } : null;
+  }).filter((x): x is Rec => !!x).sort((a, b) => b.similarity - a.similarity).slice(0, 12);
 });
 on('DELETE', '/products/:id/images', (c) => {
   const actor = guard(c, 'manager');
@@ -758,6 +878,7 @@ export async function demoRequest<T>(method: string, path: string, opts: Request
   const form = opts.body instanceof FormData ? opts.body : null;
   if (form) for (const [, v] of form.entries()) if (v instanceof File && v.size > 0 && !dataUrls.has(v)) dataUrls.set(v, await toDataUrl(v));
   const body: Rec = form ? Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === 'string')) : ((opts.body as Rec) ?? {});
+  if (method === 'POST' && clean === '/products/visual-search') await warmSignatures();
   const user = opts.auth === false ? null : userFromToken(token);
   for (const [m, re, handler] of routes) {
     if (m !== method) continue;

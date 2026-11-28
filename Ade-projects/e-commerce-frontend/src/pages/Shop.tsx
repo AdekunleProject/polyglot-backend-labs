@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { LuSearch, LuSlidersHorizontal, LuX } from 'react-icons/lu';
+import { LuCamera, LuSearch, LuSlidersHorizontal, LuX } from 'react-icons/lu';
+import { visualSearch, type SimilarProduct } from '../api/reviews';
+import { errorMessage } from '../api/client';
+import { signatureFromSource } from '../lib/visual';
 import { listBrands, listCategories, listProducts, type ProductQuery } from '../api/catalog';
-import { EmptyState, ErrorState, Modal, Pager, useAsync } from '../components/ui';
+import { Alert, EmptyState, ErrorState, Modal, Pager, Spinner, useAsync } from '../components/ui';
 import { ProductCard, ProductGridSkeleton } from '../components/ProductCard';
 
 const SORTS: { label: string; sortBy: NonNullable<ProductQuery['sortBy']>; sortOrder: 'asc' | 'desc' }[] = [
@@ -21,6 +24,21 @@ export default function Shop() {
   const [min, setMin] = useState(get('min'));
   const [max, setMax] = useState(get('max'));
   const [filters, setFilters] = useState(false);
+  const [photo, setPhoto] = useState<{ url: string; results: SimilarProduct[] } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [photoErr, setPhotoErr] = useState('');
+
+  const searchByPhoto = async (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setPhotoErr('Choose a photo (JPG, PNG or WebP).'); return; }
+    setSearching(true); setPhotoErr('');
+    try {
+      const signature = await signatureFromSource(file);
+      const results = await visualSearch(signature);
+      setPhoto((old) => { if (old) URL.revokeObjectURL(old.url); return { url: URL.createObjectURL(file), results }; });
+    } catch (e) { setPhotoErr(errorMessage(e)); } finally { setSearching(false); }
+  };
+  const clearPhoto = () => { if (photo) URL.revokeObjectURL(photo.url); setPhoto(null); setPhotoErr(''); };
 
   useEffect(() => { setSearch(get('search')); setMin(get('min')); setMax(get('max')); }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -88,7 +106,11 @@ export default function Shop() {
         <div className="flex w-full gap-2 sm:w-auto">
           <form className="relative flex-1 sm:w-64" onSubmit={(e) => { e.preventDefault(); patch({ search: search.trim() || undefined }); }} role="search">
             <LuSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mute" />
-            <input className="field pl-10!" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search products" />
+            <input className="field pl-10! pr-11!" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search products" />
+            <label className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 cursor-pointer place-items-center rounded-lg text-brand-600 transition hover:bg-brand-50 focus-within:ring-2 focus-within:ring-brand-300" title="Search with a photo">
+              {searching ? <Spinner /> : <LuCamera />}
+              <input type="file" accept="image/*" className="sr-only" aria-label="Search with a photo" onChange={(e) => { void searchByPhoto(e.target.files?.[0]); e.target.value = ''; }} />
+            </label>
           </form>
           <select className="field w-auto" aria-label="Sort" value={sortIdx} onChange={(e) => patch({ sort: `${SORTS[+e.target.value].sortBy}:${SORTS[+e.target.value].sortOrder}` })}>
             {SORTS.map((s, i) => <option key={s.label} value={i}>{s.label}</option>)}
@@ -96,6 +118,32 @@ export default function Shop() {
           <button className="btn-ghost lg:hidden" onClick={() => setFilters(true)} aria-label="Filters"><LuSlidersHorizontal /></button>
         </div>
       </div>
+
+      {photoErr && <div className="mb-5"><Alert>{photoErr}</Alert></div>}
+      {photo && (
+        <section className="card mb-8 overflow-hidden" aria-label="Visual search results">
+          <div className="flex flex-wrap items-center gap-4 border-b border-line bg-brand-50/60 p-4">
+            <img src={photo.url} alt="Your photo" className="h-16 w-16 rounded-xl object-cover ring-2 ring-white" />
+            <div className="min-w-0 flex-1">
+              <p className="font-display font-bold">Looks like your photo</p>
+              <p className="text-sm text-mute">Matched by colour and layout. Products without a photo match are not listed.</p>
+            </div>
+            <button className="btn-ghost btn-sm" onClick={clearPhoto}><LuX /> Clear photo</button>
+          </div>
+          {photo.results.length === 0 ? (
+            <p className="p-6 text-sm text-mute">No products with photos to compare yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+              {photo.results.slice(0, 12).map((p) => (
+                <div key={p._id} className="relative">
+                  <span className="absolute right-2 top-2 z-10 rounded-full bg-night-900/85 px-2 py-0.5 text-[11px] font-bold text-gold-300 backdrop-blur">{p.similarity}% match</span>
+                  <ProductCard product={p} />
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {active.length > 0 && (
         <div className="mb-5 flex flex-wrap items-center gap-2">

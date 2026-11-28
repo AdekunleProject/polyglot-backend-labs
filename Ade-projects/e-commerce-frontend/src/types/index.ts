@@ -42,6 +42,8 @@ export interface Product {
   category?: Category | string;
   featured?: boolean;
   isActive: boolean;
+  ratingAverage?: number;
+  ratingCount?: number;
   createdAt?: string;
 }
 
@@ -183,3 +185,20 @@ export interface SalesReport {
   totals: { orders: number; payments: number; revenue: number; refunds: number; refundedAmount: number; newCustomers: number };
   byDay: { day: string; orders: number; payments: number; revenue: number }[];
 }
+
+export interface ReviewReply { _id: string; user: string; authorName: string; authorRole: Role; text: string; createdAt: string }
+export interface Review {
+  _id: string;
+  product: string | { _id: string; name: string; images?: string[] };
+  user: string;
+  authorName: string;
+  authorRole: Role;
+  rating: number;
+  comment: string;
+  edited: boolean;
+  replies: ReviewReply[];
+  createdAt: string;
+  updatedAt?: string;
+}
+export interface RatingSummary { average: number; count: number; breakdown: Record<'1' | '2' | '3' | '4' | '5', number> }
+export interface ReviewPage { data: Review[]; meta: Meta; summary?: RatingSummary }

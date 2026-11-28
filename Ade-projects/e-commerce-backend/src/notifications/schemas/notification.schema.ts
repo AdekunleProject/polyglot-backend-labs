@@ -21,6 +21,8 @@ export enum NotificationType {
   REFUND_VERIFIED = 'REFUND_VERIFIED',
   REFUND_DECIDED = 'REFUND_DECIDED',
   REPLACEMENT_SENT = 'REPLACEMENT_SENT',
+  NEW_REVIEW = 'NEW_REVIEW',
+  REVIEW_REPLY = 'REVIEW_REPLY',
 }
 
 @Schema({ timestamps: true })

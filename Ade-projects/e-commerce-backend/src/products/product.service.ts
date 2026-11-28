@@ -16,6 +16,20 @@ import {
 } from '../common/utils/pagination.utils';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { FileUpload } from 'src/aws/aws.file-upload';
+import { SIGNATURE_LENGTH } from './dto/visual-search.dto';
+
+export function parseSignature(raw?: string | number[]): number[] | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (Array.isArray(value) && value.length === SIGNATURE_LENGTH && value.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1)) {
+      return value;
+    }
+  } catch {
+    /* fall through */
+  }
+  throw new BadRequestException('Invalid visual signature.');
+}
 
 @Injectable()
 export class ProductsService {
@@ -46,8 +60,10 @@ export class ProductsService {
         );
       }
     }
+    const { visualSignature, ...rest } = dto;
     return this.productModel.create({
-      ...dto,
+      ...rest,
+      visualSignature: parseSignature(visualSignature),
       slug,
       sku: dto.sku.toUpperCase(),
       images: uploadedImages,
@@ -143,9 +159,13 @@ export class ProductsService {
     if (exists) {
       throw new BadRequestException('Product already exists.');
     }
+    const data: Record<string, unknown> = { ...update };
+    if (update.visualSignature !== undefined) {
+      data.visualSignature = parseSignature(update.visualSignature);
+    }
     const product = await this.productModel.findByIdAndUpdate(
       productId,
-      update,
+      data,
       { new: true },
     );
     if (!product) {
@@ -154,7 +174,7 @@ export class ProductsService {
     return product;
   }
 
-  async addImages(productId: string, images: Express.Multer.File[]) {
+  async addImages(productId: string, images: Express.Multer.File[], signature?: string) {
     const product = await this.productModel.findById(productId);
     if (!product) {
       throw new NotFoundException('Product not found.');
@@ -169,7 +189,10 @@ export class ProductsService {
     for (const image of images) {
       uploaded.push(await this.fileUpload.uploadFile(image, 'products'));
     }
+    const hadImages = (product.images?.length ?? 0) > 0;
     product.images = [...(product.images ?? []), ...uploaded];
+    const parsed = parseSignature(signature);
+    if (parsed && !hadImages) product.visualSignature = parsed;
     await product.save();
     return product;
   }
@@ -187,6 +210,27 @@ export class ProductsService {
       throw new NotFoundException('Product not found.');
     }
     return product;
+  }
+
+  async visualSearch(signature: number[], limit = 12) {
+    const candidates = await this.productModel
+      .find({ isActive: true, visualSignature: { $exists: true, $ne: [] } })
+      .select('+visualSignature')
+      .populate('category')
+      .populate('brand')
+      .lean();
+    const maxDistance = Math.sqrt(SIGNATURE_LENGTH);
+    return candidates
+      .map((product) => {
+        const other = (product.visualSignature ?? []) as number[];
+        let sum = 0;
+        for (let i = 0; i < SIGNATURE_LENGTH; i++) sum += ((signature[i] ?? 0) - (other[i] ?? 0)) ** 2;
+        const { visualSignature, ...rest } = product;
+        void visualSignature;
+        return { ...rest, similarity: Math.max(0, Math.round((1 - Math.sqrt(sum) / maxDistance) * 100)) };
+      })
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
   }
 
   async remove(productId: string) {

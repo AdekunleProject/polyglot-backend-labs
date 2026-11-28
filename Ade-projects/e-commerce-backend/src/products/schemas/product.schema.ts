@@ -75,6 +75,16 @@ export class Product extends Document {
     default: false,
   })
   featured!: boolean;
+
+  @Prop({ default: 0, min: 0, max: 5 })
+  ratingAverage!: number;
+
+  @Prop({ default: 0, min: 0 })
+  ratingCount!: number;
+
+  // Coarse colour layout of the first photo, used by visual search.
+  @Prop({ type: [Number], default: undefined, select: false })
+  visualSignature?: number[];
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);

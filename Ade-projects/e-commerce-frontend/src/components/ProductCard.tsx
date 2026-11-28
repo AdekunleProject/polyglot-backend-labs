@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { LuStar } from 'react-icons/lu';
 import { money, nameOf } from '../lib/format';
 import { productArt } from '../lib/art';
+import { RatingLine } from './Reviews';
 import type { Product } from '../types';
 
 export function ProductImage({ product, index = 0, className = '' }: { product?: Pick<Product, 'name' | 'images'>; index?: number; className?: string }) {
@@ -23,6 +24,7 @@ export function ProductCard({ product }: { product: Product }) {
       <div className="flex flex-1 flex-col p-4">
         <p className="text-[11px] font-bold uppercase tracking-wider text-brand-600">{nameOf(product.brand) || nameOf(product.category)}</p>
         <h3 className="mt-1 line-clamp-2 min-h-[2.6rem] font-display text-[15px] font-semibold leading-snug">{product.name}</h3>
+        <RatingLine average={product.ratingAverage} count={product.ratingCount} className="mt-1.5" />
         <p className="mt-auto pt-3 font-display text-lg font-bold">{money(product.price)}</p>
       </div>
     </Link>

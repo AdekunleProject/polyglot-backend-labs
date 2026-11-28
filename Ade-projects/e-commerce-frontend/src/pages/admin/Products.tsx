@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { LuBoxes, LuLayers, LuPencil, LuPlus, LuSearch, LuTrash2, LuX } from 'react-icons/lu';
+import { signatureFromSource } from '../../lib/visual';
 import * as cat from '../../api/catalog';
 import { errorMessage } from '../../api/client';
 import { ProductImage } from '../../components/ProductCard';
@@ -96,6 +97,7 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
         if (files.length) {
           const fd = new FormData();
           files.forEach((file) => fd.append('images', file));
+          if (!photos.length) { try { fd.append('visualSignature', JSON.stringify(await signatureFromSource(files[0]))); } catch { /* photos are still added */ } }
           await cat.addProductImages(product._id, fd);
         }
         toast.success('Product updated');
@@ -104,6 +106,7 @@ function ProductForm({ product, brands, categories, onClose, onSaved }: { produc
         fd.append('name', f.name.trim()); fd.append('sku', f.sku.trim()); fd.append('price', f.price); fd.append('description', f.description.trim());
         fd.append('category', f.category); fd.append('brand', f.brand); fd.append('featured', String(f.featured));
         files.forEach((file) => fd.append('images', file));
+        if (files.length) { try { fd.append('visualSignature', JSON.stringify(await signatureFromSource(files[0]))); } catch { /* the product is still created without a visual signature */ } }
         await cat.createProduct(fd);
         toast.success('Product created. Add variants to make it purchasable.');
       }

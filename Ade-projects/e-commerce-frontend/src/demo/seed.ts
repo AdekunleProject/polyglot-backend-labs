@@ -5,7 +5,7 @@ export type Rec = Record<string, any>;
 export interface Db {
   users: Rec[]; brands: Rec[]; categories: Rec[]; products: Rec[]; variants: Rec[];
   carts: Record<string, Rec[]>; orders: Rec[]; payments: Rec[]; refunds: Rec[];
-  notifications: Rec[]; audit: Rec[]; seq: number;
+  notifications: Rec[]; audit: Rec[]; reviews: Rec[]; seq: number;
 }
 
 export const DEMO_PASSWORD = 'Demo@1234';
@@ -78,7 +78,7 @@ const PRODUCTS: [string, string, string, number, string, boolean, string][] = [
 ];
 
 export function buildSeed(): Db {
-  const db: Db = { users: [], brands: [], categories: [], products: [], variants: [], carts: {}, orders: [], payments: [], refunds: [], notifications: [], audit: [], seq: 1 };
+  const db: Db = { users: [], brands: [], categories: [], products: [], variants: [], carts: {}, orders: [], payments: [], refunds: [], notifications: [], audit: [], reviews: [], seq: 1 };
 
   const mkUser = (firstname: string, lastname: string, email: string, role: string, extra: Rec = {}) => {
     const u: Rec = {
@@ -207,5 +207,43 @@ export function buildSeed(): Db {
   audit(admin, 'payment.transfer_approve', { type: 'payment', id: db.payments[0]._id }, {}, 4 * D);
   audit(admin, 'user.view', { type: 'user', id: tunde.id }, {}, 1 * D);
   audit(sup, 'report.view', undefined as any, { report: 'staff-activity' }, 5 * H);
+  seedReviews(db);
   return db;
+}
+
+const REVIEW_TEXT: [string, string, number, string, number][] = [
+  ['ada@demo.shop', 'Nova X12 Smartphone', 5, 'Fast, the camera is excellent and the battery lasts all day. Delivery came a day early.', 9],
+  ['tunde@demo.shop', 'Nova X12 Smartphone', 4, 'Very good phone. I wish the charger was in the box, but it does everything else well.', 7],
+  ['ngozi@demo.shop', 'Nova X12 Smartphone', 5, '', 4],
+  ['ibrahim@demo.shop', 'Nova X12 Smartphone', 3, 'Good value, though it heats up a little when gaming.', 3],
+  ['ada@demo.shop', 'Orbit Runner Sneakers', 5, 'Light and comfortable from the first run. True to size.', 6],
+  ['ngozi@demo.shop', 'Orbit Runner Sneakers', 4, 'Great cushioning. The white gets dirty quickly.', 5],
+  ['tunde@demo.shop', 'Weekender Duffel Bag', 5, 'Holds a lot, and the shoe compartment is a smart touch.', 8],
+  ['ada@demo.shop', 'Weekender Duffel Bag', 4, 'Sturdy canvas. The strap padding could be thicker.', 2],
+  ['tunde@demo.shop', 'Nova Studio Headphones', 2, 'The left ear cup stopped working after two days.', 1],
+  ['ngozi@demo.shop', 'Glow Vitamin C Serum', 5, 'My skin looks brighter after two weeks. No irritation.', 11],
+  ['ibrahim@demo.shop', 'Air Fryer 7.5L', 4, 'Cooks evenly and cleans easily. A bit loud.', 10],
+  ['ada@demo.shop', 'Zenith Chrono Watch', 5, 'Looks far more expensive than it is.', 12],
+];
+
+export function refreshRating(db: Db, productId: string) {
+  const list = db.reviews.filter((r) => r.product === productId);
+  const p = db.products.find((x) => x._id === productId);
+  if (!p) return;
+  p.ratingCount = list.length;
+  p.ratingAverage = list.length ? Math.round((list.reduce((t, r) => t + r.rating, 0) / list.length) * 10) / 10 : 0;
+}
+
+export function seedReviews(db: Db) {
+  db.reviews = [];
+  for (const [email, productName, rating, comment, daysAgo] of REVIEW_TEXT) {
+    const u = db.users.find((x) => x.email === email);
+    const p = db.products.find((x) => x.name === productName);
+    if (!u || !p) continue;
+    db.reviews.push({ _id: newId('rv'), product: p._id, user: u.id, authorName: `${u.firstname} ${u.lastname}`, authorRole: 'customer', rating, comment, edited: false, replies: [], createdAt: ago(daysAgo * D), updatedAt: ago(daysAgo * D) });
+  }
+  const bad = db.reviews.find((r) => r.rating === 2);
+  const mgr = db.users.find((u) => u.email === 'manager@demo.shop');
+  if (bad && mgr) bad.replies.push({ _id: newId('rp'), user: mgr.id, authorName: `${mgr.firstname} ${mgr.lastname}`, authorRole: 'manager', text: 'Sorry about that. Please start a replacement request from your order page and we will sort it out.', createdAt: ago(20 * H) });
+  db.products.forEach((p) => refreshRating(db, p._id));
 }

@@ -30,6 +30,7 @@ const AdminPayments = lazy(() => import('./pages/admin/AdminPayments'));
 const AdminRefunds = lazy(() => import('./pages/admin/AdminRefunds'));
 const Users = lazy(() => import('./pages/admin/Users'));
 const Reports = lazy(() => import('./pages/admin/Reports'));
+const Feedback = lazy(() => import('./pages/admin/Feedback'));
 const Audit = lazy(() => import('./pages/admin/Audit'));
 
 function NotFound() {
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="refunds" element={<AdminRefunds />} />
             <Route path="users" element={<Users />} />
             <Route path="reports" element={<Reports />} />
+            <Route path="feedback" element={<Feedback />} />
             <Route path="audit" element={<Audit />} />
           </Route>
         </Route>

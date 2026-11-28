@@ -18,6 +18,7 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/role.enum';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 
+import { VisualSearchDto } from './dto/visual-search.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { FilesInterceptor } from '@nestjs/platform-express';
@@ -49,6 +50,11 @@ export class ProductsController {
   @Get(':productId')
   findOne(@Param('productId') productId: string) {
     return this.productsService.findById(productId);
+  }
+
+  @Post('visual-search')
+  visualSearch(@Body() dto: VisualSearchDto) {
+    return this.productsService.visualSearch(dto.signature);
   }
 
   @Post()
@@ -92,8 +98,9 @@ export class ProductsController {
     @Param('productId') productId: string,
     @CurrentUser() actor: CurrentUserInterface,
     @UploadedFiles() images: Express.Multer.File[],
+    @Body('visualSignature') visualSignature?: string,
   ) {
-    const product = await this.productsService.addImages(productId, images);
+    const product = await this.productsService.addImages(productId, images, visualSignature);
     await this.audit.record(actor.id, 'product.update', { type: 'product', id: productId }, { fields: ['images'], added: images?.length ?? 0 });
     return product;
   }

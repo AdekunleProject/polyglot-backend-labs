@@ -10,6 +10,10 @@ import {
 } from 'class-validator';
 
 export class CreateProductDto {
+  @IsOptional()
+  @IsString()
+  visualSignature?: string;
+
   @IsString()
   @IsNotEmpty()
   name!: string;
