@@ -398,7 +398,7 @@ on('GET', '/orders/my-orders/:id', (c) => {
 on('GET', '/orders', (c) => {
   guard(c, 'manager', 'admin', 'superadmin');
   const d = load();
-  return d.orders.map((o) => { const u = d.users.find((x) => x.id === o.user); return { ...presentOrder(o), user: u ? { _id: u.id, firstname: u.firstname, lastname: u.lastname, email: u.email } : o.user }; }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return d.orders.map((o) => { const u = d.users.find((x) => x.id === o.user); return { ...presentOrder(o), user: u ? { _id: u.id, firstname: u.firstname, lastname: u.lastname, email: u.email } : o.user } as Rec; }).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 });
 on('GET', '/orders/:id', (c) => {
   guard(c, 'manager', 'admin', 'superadmin');
@@ -495,7 +495,7 @@ on('GET', '/payments/my-payments', (c) => {
 on('GET', '/payments', (c) => {
   guard(c, 'admin', 'superadmin');
   const d = load();
-  return d.payments.map((p) => { const u = d.users.find((x) => x.id === p.user); return { ...p, user: u ? { _id: u.id, firstname: u.firstname, lastname: u.lastname, email: u.email } : p.user }; }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return d.payments.map((p) => { const u = d.users.find((x) => x.id === p.user); return { ...p, user: u ? { _id: u.id, firstname: u.firstname, lastname: u.lastname, email: u.email } : p.user } as Rec; }).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 });
 on('PATCH', '/payments/bank-transfer/:id/approve', (c) => {
   const actor = guard(c, 'admin', 'superadmin');
